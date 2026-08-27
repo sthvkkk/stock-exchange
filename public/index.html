@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MockEx — Virtual Stock Exchange</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        @keyframes flashBlue { 0% { background-color: rgba(59, 130, 246, 0.25); } 100% { background-color: transparent; } }
+        .flash-up { animation: flashBlue 1s ease-out; }
+        .flash-down { animation: flashBlue 1s ease-out; }
+        .hidden { display: none !important; }
+        body { font-family: 'Calibri', 'Aptos', system-ui, -apple-system, sans-serif; background-color: #0b0f17; }
+    </style>
+</head>
+<body class="bg-[#0b0f17] text-slate-100 font-sans min-h-screen w-screen overflow-x-hidden">
+    
+    <!-- TOAST CONTAINER -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+
+    <!-- VIEW 1: LOBBY -->
+    <div id="lobby" class="min-h-screen w-full flex items-center justify-center p-4">
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 w-full max-w-md shadow-2xl shadow-black/80">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl sm:text-4xl font-bold mb-2 tracking-tight text-white">MockEx</h1>
+                <p class="text-slate-400 text-sm">Virtual Stock Exchange Terminal</p>
+            </div>
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Player Name</label>
+                    <input type="text" id="playerName" placeholder="Enter your display name" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-all duration-300">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Round Duration</label>
+                    <div class="grid grid-cols-3 gap-2" id="durationSelector">
+                        <button type="button" data-duration="10" class="duration-btn bg-slate-950 border border-blue-500 bg-blue-600/20 text-blue-400 font-semibold py-2.5 px-3 rounded-xl text-xs text-center transition-all">10 Min</button>
+                        <button type="button" data-duration="20" class="duration-btn bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700 font-semibold py-2.5 px-3 rounded-xl text-xs text-center transition-all">20 Min</button>
+                        <button type="button" data-duration="30" class="duration-btn bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700 font-semibold py-2.5 px-3 rounded-xl text-xs text-center transition-all">30 Min</button>
+                    </div>
+                </div>
+                <div class="pt-1">
+                    <button id="btnCreateRoom" class="w-full bg-[#090d16] hover:bg-slate-800 text-white font-semibold py-3.5 px-6 rounded-full border border-slate-700/60 shadow-md shadow-black/50 transition-all duration-300 flex items-center justify-between group">
+                        <span>Create New Room</span>
+                        <span class="font-bold text-slate-400 text-lg group-hover:translate-x-0.5 transition-transform">&rsaquo;</span>
+                    </button>
+                </div>
+                <div class="relative flex py-2 items-center">
+                    <div class="flex-grow border-t border-slate-800"></div>
+                    <span class="flex-shrink-0 mx-4 text-slate-500 text-xs uppercase tracking-widest">OR</span>
+                    <div class="flex-grow border-t border-slate-800"></div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Room Code</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="joinRoomCode" placeholder="Enter 4-Digit Code" maxlength="4" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white uppercase focus:outline-none focus:border-blue-500 transition-all duration-300">
+                        <button id="btnJoinRoom" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-6 rounded-full shadow-lg shadow-blue-900/30 transition-all duration-300 flex items-center gap-1">
+                            <span>Join</span>
+                            <span class="font-bold text-white/80">&rsaquo;</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIEW 2: WAITING ROOM -->
+    <div id="waitingRoom" class="hidden min-h-screen w-full flex items-center justify-center p-4">
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 sm:p-8 w-full max-w-lg shadow-2xl shadow-black/80 text-center">
+            <h2 class="text-2xl font-bold mb-6 text-white">Waiting Room</h2>
+            <div class="mb-8">
+                <p class="text-slate-400 text-xs uppercase tracking-wider mb-2">Room Code</p>
+                <div class="flex items-center justify-center gap-3">
+                    <span id="displayRoomCode" class="text-4xl sm:text-5xl font-bold tracking-widest text-blue-400">----</span>
+                    <button id="btnCopyCode" class="bg-[#090d16] hover:bg-slate-800 text-slate-200 border border-slate-700/60 rounded-full px-4 py-2 transition-all duration-300 text-xs font-semibold flex items-center gap-1">
+                        <span>Copy</span>
+                    </button>
+                </div>
+            </div>
+            <div class="mb-8">
+                <div class="flex justify-between items-center mb-4 border-b border-slate-800 pb-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Connected Players</h3>
+                    <span id="playerCount" class="bg-slate-800 px-3 py-1 rounded-full text-xs text-slate-300">0 connected</span>
+                </div>
+                <ul id="playerList" class="space-y-2 max-h-48 overflow-y-auto text-left pr-1">
+                    <!-- Players inserted here -->
+                </ul>
+            </div>
+            <button id="btnStartGame" class="hidden w-full bg-[#090d16] hover:bg-slate-800 text-white font-bold py-3.5 px-6 rounded-full border border-slate-700/60 shadow-md shadow-black/50 transition-all duration-300 text-base flex items-center justify-center gap-2">
+                <span>Start Game</span>
+                <span class="font-bold text-slate-400 text-lg">&rsaquo;</span>
+            </button>
+            <p id="waitMessage" class="text-slate-500 text-xs mt-4">Waiting for host to start...</p>
+        </div>
+    </div>
+
+    <!-- VIEW 3: ARENA -->
+    <div id="arena" class="hidden min-h-screen w-full flex flex-col">
+        <!-- Sticky Top Header & News Ticker Section -->
+        <div class="sticky top-0 z-40 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-800 shrink-0">
+            <!-- Top Navbar -->
+            <header class="px-4 sm:px-8 py-3 flex justify-between items-center">
+                <div class="flex items-center gap-2 sm:gap-3">
+                    <span class="text-lg sm:text-xl font-bold tracking-tight text-white">MockEx</span>
+                    <span id="arenaRoomCode" class="bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-full text-xs text-slate-300 font-medium"></span>
+                </div>
+                <div id="timerDisplay" class="text-base sm:text-xl font-bold text-slate-200 tracking-wider">
+                    --:--
+                </div>
+                <div class="text-right">
+                    <div class="text-[10px] sm:text-xs text-slate-400 uppercase tracking-wide">Net Worth</div>
+                    <div id="navNetWorth" class="text-sm sm:text-lg font-bold text-blue-400">₹0.00</div>
+                </div>
+            </header>
+
+            <!-- Sticky News Ticker Banner -->
+            <div id="newsBanner" class="overflow-hidden h-0 opacity-0 transition-all duration-500 ease-in-out w-full text-center font-medium text-xs sm:text-sm tracking-wide flex items-center justify-center bg-slate-950 border-t border-slate-800/60 text-slate-200">
+                <span id="newsText" class="px-4 transition-opacity duration-300 line-clamp-1"></span>
+            </div>
+        </div>
+
+        <!-- Main Wrapper Container (Max 7XL Auto Centered) -->
+        <div class="w-full max-w-7xl mx-auto flex-1 p-4 sm:p-6 flex flex-col gap-6">
+            
+            <!-- Portfolio Summary Bar -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 shrink-0">
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg shadow-black/40">
+                    <div class="text-slate-400 text-xs uppercase tracking-wider mb-1 font-semibold">Available Cash</div>
+                    <div id="statCash" class="text-xl sm:text-2xl font-bold text-white">₹0.00</div>
+                </div>
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg shadow-black/40">
+                    <div class="text-slate-400 text-xs uppercase tracking-wider mb-1 font-semibold">Stock Value</div>
+                    <div id="statStockValue" class="text-xl sm:text-2xl font-bold text-white">₹0.00</div>
+                </div>
+                <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg shadow-black/40">
+                    <div class="text-slate-400 text-xs uppercase tracking-wider mb-1 font-semibold">Total Net Worth</div>
+                    <div id="statNetWorth" class="text-xl sm:text-2xl font-bold text-blue-400">₹0.00</div>
+                </div>
+            </div>
+
+            <!-- Content Area: Stock Grid + Leaderboard -->
+            <div class="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
+                
+                <!-- Stock Grid Container (xl:col-span-3) -->
+                <div class="w-full xl:col-span-3">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-slate-100 uppercase tracking-wide">Market Catalog</h2>
+                        <span class="text-xs text-slate-400">Live 1s Ticks</span>
+                    </div>
+                    <div id="stockGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <!-- Stocks inserted here -->
+                    </div>
+                </div>
+
+                <!-- Leaderboard Panel (xl:col-span-1) -->
+                <div class="w-full xl:col-span-1 bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-lg shrink-0">
+                    <div class="bg-slate-950/60 py-3 px-4 border-b border-slate-800 flex justify-between items-center">
+                        <h3 class="font-bold text-slate-200 text-sm">Live Leaderboard</h3>
+                        <span class="text-xs text-slate-500">Ranked by NW</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs sm:text-sm text-left">
+                            <thead class="text-[10px] sm:text-xs text-slate-400 bg-slate-950/40 uppercase border-b border-slate-800">
+                                <tr>
+                                    <th class="px-4 py-2.5">#</th>
+                                    <th class="px-4 py-2.5">Player</th>
+                                    <th class="px-4 py-2.5 text-right">Net Worth</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leaderboardBody">
+                                <!-- Leaderboard inserted here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Attribution -->
+            <footer class="w-full py-4 text-center text-xs text-slate-400 font-medium border-t border-slate-800/60 bg-slate-950/80 mt-8 shrink-0">
+                Created by Saathvik Gupta | Email: saathvik2008@yahoo.com
+            </footer>
+        </div>
+    </div>
+
+    <!-- TRADE MODAL (FLUID DRAWER: w-full sm:w-96 right-0 top-0 h-full fixed) -->
+    <div id="tradeModal" class="hidden fixed right-0 top-0 h-full w-full sm:w-96 z-50 bg-[#0b0f17]/95 backdrop-blur-xl shadow-2xl border-l border-slate-800 flex flex-col p-6 transition-all duration-300">
+        <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+            <div>
+                <span class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Order Entry</span>
+                <h3 class="text-xl font-bold text-white"><span id="modalTicker" class="text-blue-400"></span></h3>
+            </div>
+            <button id="btnCloseModal" class="bg-[#090d16] hover:bg-slate-800 text-slate-300 border border-slate-700/60 rounded-full w-9 h-9 flex items-center justify-center text-xl transition-all">&times;</button>
+        </div>
+        
+        <div class="mb-6 bg-slate-900 border border-slate-800 p-4 rounded-xl flex justify-between items-center">
+            <span class="text-slate-400 text-xs uppercase tracking-wider">Live Price</span>
+            <span id="modalPrice" class="text-xl font-extrabold text-white"></span>
+        </div>
+
+        <div class="space-y-4 mb-6">
+            <div>
+                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Quantity</label>
+                <input type="number" id="tradeQuantity" min="1" value="1" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-base focus:outline-none focus:border-blue-500">
+            </div>
+            <div class="flex justify-between text-sm py-1 border-b border-slate-800/60">
+                <span class="text-slate-400">Total Value:</span>
+                <span id="modalTotalValue" class="font-bold text-white"></span>
+            </div>
+            <div class="flex justify-between text-xs text-slate-400">
+                <span>Owned: <span id="modalOwned" class="text-slate-200 font-semibold">0</span></span>
+                <span>Max Buy: <span id="modalMaxBuy" class="text-slate-200 font-semibold">0</span></span>
+            </div>
+        </div>
+
+        <div id="modalError" class="hidden mb-4 text-xs text-slate-200 bg-slate-800 p-3 rounded-xl border border-slate-700"></div>
+
+        <!-- BUY (EMERALD) & SELL (ROSE) - STRICTLY ISOLATED HERE -->
+        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-slate-800">
+            <button id="btnBuy" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-950/50 transition-all text-base touch-manipulation">BUY</button>
+            <button id="btnSell" class="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-rose-950/50 transition-all text-base touch-manipulation">SELL</button>
+        </div>
+    </div>
+
+    <!-- GAME OVER OVERLAY -->
+    <div id="gameOver" class="hidden fixed inset-0 bg-[#0b0f17]/95 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 w-full max-w-2xl shadow-2xl text-center">
+            <h1 class="text-4xl sm:text-5xl font-bold text-white mb-2">Game Over!</h1>
+            <p class="text-slate-400 text-sm mb-6">Final Standings</p>
+            
+            <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto mb-6">
+                <table class="w-full text-left text-xs sm:text-sm">
+                    <thead class="bg-slate-900 text-slate-400 text-xs uppercase border-b border-slate-800">
+                        <tr>
+                            <th class="px-6 py-3.5">Rank</th>
+                            <th class="px-6 py-3.5">Player</th>
+                            <th class="px-6 py-3.5 text-right">Final Net Worth</th>
+                        </tr>
+                    </thead>
+                    <tbody id="finalStandingsBody" class="divide-y divide-slate-800">
+                        <!-- Final standings here -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <button id="btnBackToLobby" class="bg-[#090d16] hover:bg-slate-800 text-white font-bold py-3.5 px-8 rounded-full border border-slate-700/60 shadow-md transition-all inline-flex items-center gap-2">
+                <span>Back to Lobby</span>
+                <span class="font-bold text-slate-400 text-lg">&rsaquo;</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // STATE
+        let socket;
+        try {
+            socket = io();
+        } catch(e) {
+            console.warn("Socket.io not available, running in mock mode");
+        }
+        
+        let mySocketId = null;
+        let roomCode = null;
+        let isHost = false;
+        let playerName = "";
+        let currentStocks = {}; // ticker -> stock object
+        let currentPortfolio = {}; // ticker -> qty
+        let currentCash = 0;
+        let selectedTickerForTrade = null;
+        let selectedDuration = 10;
+
+        // DURATION SELECTOR LOGIC
+        document.querySelectorAll('.duration-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.duration-btn').forEach(b => {
+                    b.className = "duration-btn bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700 font-semibold py-2.5 px-3 rounded-xl text-xs text-center transition-all";
+                });
+                btn.className = "duration-btn bg-slate-950 border border-blue-500 bg-blue-600/20 text-blue-400 font-semibold py-2.5 px-3 rounded-xl text-xs text-center transition-all";
+                selectedDuration = parseInt(btn.dataset.duration) || 10;
+            });
+        });
+
+        // FORMATTING
+        const formatMoney = (val) => Number(val).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
+        
+        // DOM ELEMENTS
+        const views = {
+            lobby: document.getElementById('lobby'),
+            waitingRoom: document.getElementById('waitingRoom'),
+            arena: document.getElementById('arena')
+        };
+        const modals = {
+            trade: document.getElementById('tradeModal'),
+            gameOver: document.getElementById('gameOver')
+        };
+
+        // HELPER: View switching
+        function showView(viewName) {
+            Object.values(views).forEach(v => v.classList.add('hidden'));
+            views[viewName].classList.remove('hidden');
+        }
+
+        // HELPER: Toast
+        function showToast(message, type = 'error') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `px-4 py-3 rounded-xl shadow-xl text-xs sm:text-sm font-medium transition-all duration-300 opacity-0 ${type === 'error' ? 'bg-slate-800 text-slate-100 border border-slate-700' : 'bg-blue-600 text-white'}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => { toast.classList.remove('opacity-0'); }, 10);
+            setTimeout(() => {
+                toast.classList.add('opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // LOBBY LOGIC
+        document.getElementById('btnCreateRoom').addEventListener('click', () => {
+            playerName = document.getElementById('playerName').value.trim();
+            if(!playerName) return showToast('Please enter a name');
+            if(socket) socket.emit('createRoom', { playerName, durationMinutes: selectedDuration });
+        });
+
+        document.getElementById('btnJoinRoom').addEventListener('click', () => {
+            playerName = document.getElementById('playerName').value.trim();
+            const code = document.getElementById('joinRoomCode').value.trim();
+            if(!playerName) return showToast('Please enter a name');
+            if(!code || code.length !== 4) return showToast('Please enter a 4-digit room code');
+            if(socket) socket.emit('joinRoom', { roomCode: code, playerName });
+        });
+
+        // WAITING ROOM LOGIC
+        document.getElementById('btnCopyCode').addEventListener('click', () => {
+            navigator.clipboard.writeText(roomCode);
+            showToast('Code copied!', 'success');
+        });
+
+        document.getElementById('btnStartGame').addEventListener('click', () => {
+            if(socket && isHost) socket.emit('startGame', { roomCode });
+        });
+
+        // TRADE MODAL LOGIC
+        const tradeQtyInput = document.getElementById('tradeQuantity');
+        function updateTradeModalVals() {
+            if(!selectedTickerForTrade) return;
+            const price = currentStocks[selectedTickerForTrade].price;
+            const qty = parseInt(tradeQtyInput.value) || 0;
+            document.getElementById('modalPrice').textContent = formatMoney(price);
+            document.getElementById('modalTotalValue').textContent = formatMoney(price * qty);
+            
+            const owned = currentPortfolio[selectedTickerForTrade] || 0;
+            const maxBuy = Math.floor(currentCash / price);
+            
+            document.getElementById('modalOwned').textContent = owned;
+            document.getElementById('modalMaxBuy').textContent = maxBuy;
+        }
+
+        tradeQtyInput.addEventListener('input', updateTradeModalVals);
+        
+        document.getElementById('btnCloseModal').addEventListener('click', () => {
+            modals.trade.classList.add('hidden');
+            document.getElementById('modalError').classList.add('hidden');
+        });
+
+        function executeTrade(action) {
+            const qty = parseInt(tradeQtyInput.value) || 0;
+            if(qty <= 0) return;
+            if(socket) {
+                socket.emit('executeTrade', {
+                    roomCode,
+                    ticker: selectedTickerForTrade,
+                    action,
+                    quantity: qty
+                });
+            }
+        }
+
+        document.getElementById('btnBuy').addEventListener('click', () => executeTrade('BUY'));
+        document.getElementById('btnSell').addEventListener('click', () => executeTrade('SELL'));
+
+        // RENDER STOCKS
+        function renderStocks(stocksArray) {
+            const grid = document.getElementById('stockGrid');
+            stocksArray.forEach(stock => {
+                currentStocks[stock.ticker] = stock;
+                let card = document.getElementById(`stock-${stock.ticker}`);
+                const owned = currentPortfolio[stock.ticker] || 0;
+                
+                if(!card) {
+                    card = document.createElement('div');
+                    card.id = `stock-${stock.ticker}`;
+                    card.className = "w-full min-h-[140px] p-4 bg-slate-900/90 border border-slate-800 rounded-xl flex flex-col justify-between transition-all duration-300 shadow-md shadow-black/30 hover:border-blue-500/50 hover:scale-[1.01] cursor-pointer group";
+                    grid.appendChild(card);
+                } else {
+                    // check if price changed for neutral flash
+                    const priceEl = document.getElementById(`price-${stock.ticker}`);
+                    const oldPriceStr = priceEl?.dataset?.raw;
+                    if(oldPriceStr && parseFloat(oldPriceStr) !== stock.price) {
+                        priceEl.classList.remove('flash-up', 'flash-down');
+                        void priceEl.offsetWidth; // trigger reflow
+                        priceEl.classList.add('flash-up');
+                    }
+                }
+
+                card.onclick = () => openTrade(stock.ticker);
+
+                const isPositive = stock.changePercent > 0;
+                const isNegative = stock.changePercent < 0;
+                const changeClass = isPositive ? 'text-emerald-400' : isNegative ? 'text-rose-400' : 'text-slate-300';
+                const signStr = isPositive ? '+' : '';
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start gap-3 mb-3 overflow-hidden">
+                        <div class="flex-1 min-w-0 pr-2">
+                            <div class="text-lg font-bold text-white tracking-wide truncate block group-hover:text-blue-400 transition-colors">${stock.ticker}</div>
+                            <div class="text-xs text-slate-400 font-medium truncate block">${stock.name || 'Company'}</div>
+                        </div>
+                        <div class="text-right flex-shrink-0">
+                            <div id="price-${stock.ticker}" data-raw="${stock.price}" class="text-xl font-extrabold text-white whitespace-nowrap px-1 py-0.5 rounded-lg transition-all">${formatMoney(stock.price)}</div>
+                            <div class="text-xs sm:text-sm font-semibold ${changeClass}">${signStr}${stock.changePercent.toFixed(2)}%</div>
+                        </div>
+                    </div>
+                    <div class="mt-2 pt-2.5 border-t border-slate-800/80 flex justify-between items-center text-xs">
+                        <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">POSITION</span>
+                        <span class="text-sm font-bold text-slate-200">${owned} shares</span>
+                    </div>
+                `;
+            });
+            // Update trade modal if open
+            if(!modals.trade.classList.contains('hidden')) {
+                updateTradeModalVals();
+            }
+        }
+
+        window.openTrade = (ticker) => {
+            selectedTickerForTrade = ticker;
+            tradeQtyInput.value = 1;
+            document.getElementById('modalTicker').textContent = ticker;
+            document.getElementById('modalError').classList.add('hidden');
+            updateTradeModalVals();
+            modals.trade.classList.remove('hidden');
+        };
+
+        // RENDER LEADERBOARD (NO EMOJIS)
+        function renderLeaderboard(board) {
+            const tbody = document.getElementById('leaderboardBody');
+            tbody.innerHTML = '';
+            board.forEach(p => {
+                const tr = document.createElement('tr');
+                tr.className = `border-b border-slate-800/60 transition-all duration-300 ${p.id === mySocketId ? 'bg-slate-800/40' : ''}`;
+                const rankLabel = p.rank === 1 ? '1st' : p.rank === 2 ? '2nd' : p.rank === 3 ? '3rd' : `#${p.rank}`;
+                tr.innerHTML = `
+                    <td class="px-4 py-2.5 font-bold text-slate-400">${rankLabel}</td>
+                    <td class="px-4 py-2.5 font-medium ${p.id === mySocketId ? 'text-blue-400 font-bold' : 'text-slate-200'}">${p.name}</td>
+                    <td class="px-4 py-2.5 text-right font-semibold text-slate-200">${formatMoney(p.netWorth)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // SOCKET LISTENERS
+        if(socket) {
+            socket.on('connect', () => { mySocketId = socket.id; });
+
+            socket.on('roomCreated', (data) => {
+                roomCode = data.roomCode;
+                isHost = true;
+                document.getElementById('displayRoomCode').textContent = roomCode;
+                document.getElementById('arenaRoomCode').textContent = `Code: ${roomCode}`;
+                document.getElementById('btnStartGame').classList.remove('hidden');
+                document.getElementById('waitMessage').classList.add('hidden');
+                showView('waitingRoom');
+            });
+
+            socket.on('playerJoined', (data) => {
+                const ul = document.getElementById('playerList');
+                ul.innerHTML = '';
+                document.getElementById('playerCount').textContent = `${data.players.length} connected`;
+                data.players.forEach(p => {
+                    const li = document.createElement('li');
+                    li.className = "bg-slate-950 border border-slate-800/80 px-4 py-2 rounded-xl flex items-center justify-between";
+                    li.innerHTML = `<span class="font-medium text-slate-200 text-sm">${p.name}</span>
+                                    ${p.id === mySocketId ? '<span class="text-[10px] uppercase font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full">You</span>' : ''}`;
+                    ul.appendChild(li);
+                });
+            });
+
+            socket.on('roomJoined', (data) => {
+                roomCode = data.roomCode;
+                isHost = false;
+                document.getElementById('displayRoomCode').textContent = roomCode;
+                document.getElementById('arenaRoomCode').textContent = `Code: ${roomCode}`;
+                document.getElementById('btnStartGame').classList.add('hidden');
+                document.getElementById('waitMessage').classList.remove('hidden');
+                showView('waitingRoom');
+            });
+
+            socket.on('gameStarted', (data) => {
+                showView('arena');
+                renderStocks(data.stocks);
+                if(data.timer) {
+                    const m = Math.floor(data.timer / 60).toString().padStart(2, '0');
+                    const s = (data.timer % 60).toString().padStart(2, '0');
+                    document.getElementById('timerDisplay').textContent = `${m}:${s}`;
+                }
+            });
+
+            socket.on('priceUpdate', (data) => {
+                renderStocks(data.stocks);
+            });
+
+            socket.on('newsFlash', (data) => {
+                const banner = document.getElementById('newsBanner');
+                const text = document.getElementById('newsText');
+                
+                banner.className = `overflow-hidden transition-all duration-500 ease-in-out w-full text-center font-medium text-xs sm:text-sm tracking-wide shrink-0 flex items-center justify-center bg-slate-900 border-b border-slate-800/60 text-slate-200 h-10 opacity-100`;
+                
+                text.classList.add('opacity-0');
+                setTimeout(() => {
+                    text.textContent = `BREAKING: ${data.ticker} - ${data.headline}`;
+                    text.classList.remove('opacity-0');
+                }, 300);
+            });
+
+            socket.on('portfolioUpdate', (data) => {
+                currentPortfolio = data.portfolio || {};
+                currentCash = data.cash || 0;
+                document.getElementById('statCash').textContent = formatMoney(currentCash);
+                document.getElementById('statStockValue').textContent = formatMoney(data.stockValue || 0);
+                document.getElementById('statNetWorth').textContent = formatMoney(data.netWorth || 0);
+                document.getElementById('navNetWorth').textContent = formatMoney(data.netWorth || 0);
+                renderStocks(Object.values(currentStocks));
+            });
+
+            socket.on('leaderboard', (data) => {
+                renderLeaderboard(data);
+            });
+
+            socket.on('tradeResult', (data) => {
+                if(!data.success) {
+                    const err = document.getElementById('modalError');
+                    err.textContent = data.message;
+                    err.classList.remove('hidden');
+                } else {
+                    modals.trade.classList.add('hidden');
+                    showToast(data.message, 'success');
+                }
+            });
+
+            socket.on('timerUpdate', (data) => {
+                const display = document.getElementById('timerDisplay');
+                const m = Math.floor(data.remaining / 60).toString().padStart(2, '0');
+                const s = (data.remaining % 60).toString().padStart(2, '0');
+                display.textContent = `${m}:${s}`;
+            });
+
+            socket.on('gameOver', (data) => {
+                const tbody = document.getElementById('finalStandingsBody');
+                tbody.innerHTML = '';
+                data.standings.forEach(p => {
+                    const tr = document.createElement('tr');
+                    const isWinner = p.rank === 1;
+                    tr.className = isWinner ? 'bg-blue-950/40 border-l-4 border-blue-500' : '';
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 text-slate-300 font-bold">${isWinner ? '1st' : p.rank === 2 ? '2nd' : p.rank === 3 ? '3rd' : `#${p.rank}`}</td>
+                        <td class="px-6 py-4 font-bold ${isWinner ? 'text-blue-400' : 'text-slate-100'}">${p.name} ${p.id === mySocketId ? '(You)' : ''}</td>
+                        <td class="px-6 py-4 text-right font-bold text-slate-100">${formatMoney(p.netWorth)}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+                modals.gameOver.classList.remove('hidden');
+            });
+
+            socket.on('error', (data) => {
+                showToast(data.message, 'error');
+            });
+        }
+
+        document.getElementById('btnBackToLobby').addEventListener('click', () => {
+            window.location.reload();
+        });
+
+    </script>
+</body>
+</html>
