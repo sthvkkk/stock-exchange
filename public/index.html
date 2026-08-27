@@ -12,6 +12,17 @@
         .flash-down { animation: flashBlue 1s ease-out; }
         .hidden { display: none !important; }
         body { font-family: 'Calibri', 'Aptos', system-ui, -apple-system, sans-serif; background-color: #0b0f17; }
+
+        @keyframes marquee {
+            0% { transform: translateX(100%); }
+            100% { transform: translateX(-100%); }
+        }
+        .animate-marquee {
+            display: inline-block !important;
+            white-space: nowrap !important;
+            animation: marquee 18s linear infinite;
+            will-change: transform;
+        }
     </style>
 </head>
 <body class="bg-[#0b0f17] text-slate-100 font-sans min-h-screen w-screen overflow-x-hidden">
@@ -114,8 +125,8 @@
             </header>
 
             <!-- Sticky News Ticker Banner -->
-            <div id="newsBanner" class="overflow-hidden h-0 opacity-0 transition-all duration-500 ease-in-out w-full text-center font-medium text-xs sm:text-sm tracking-wide flex items-center justify-center bg-slate-950 border-t border-slate-800/60 text-slate-200">
-                <span id="newsText" class="px-4 transition-opacity duration-300 line-clamp-1"></span>
+            <div id="newsBanner" class="overflow-hidden h-0 opacity-0 transition-all duration-500 ease-in-out w-full font-medium text-xs sm:text-sm tracking-wide flex items-center bg-slate-950 border-t border-slate-800/60 text-slate-200">
+                <span id="newsText" class="inline-block whitespace-nowrap transition-opacity duration-300"></span>
             </div>
         </div>
 
@@ -513,12 +524,16 @@
                 const banner = document.getElementById('newsBanner');
                 const text = document.getElementById('newsText');
                 
-                banner.className = `overflow-hidden transition-all duration-500 ease-in-out w-full text-center font-medium text-xs sm:text-sm tracking-wide shrink-0 flex items-center justify-center bg-slate-900 border-b border-slate-800/60 text-slate-200 h-10 opacity-100`;
+                banner.className = `overflow-hidden transition-all duration-500 ease-in-out w-full font-medium text-xs sm:text-sm tracking-wide flex items-center bg-slate-950 border-t border-slate-800/60 text-slate-200 h-10 opacity-100`;
                 
+                text.classList.remove('animate-marquee');
                 text.classList.add('opacity-0');
+                
                 setTimeout(() => {
-                    text.textContent = `BREAKING: ${data.ticker} - ${data.headline}`;
+                    text.textContent = `BREAKING: ${data.ticker} — ${data.headline}`;
                     text.classList.remove('opacity-0');
+                    void text.offsetWidth; // trigger reflow to restart marquee
+                    text.classList.add('animate-marquee');
                 }, 300);
             });
 
