@@ -11,14 +11,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// ─── Stock Catalog (Indian Market) ──────────────────────────────────────────
+// ─── Stock Catalog (Exact INR Base Prices) ──────────────────────────────────
 const STOCK_CATALOG = [
-  { ticker: 'RELIANCE', name: 'Reliance Industries',       basePrice: 2950.00, volatility: 0.012 },
-  { ticker: 'TCS',      name: 'Tata Consultancy Services', basePrice: 4150.00, volatility: 0.010 },
-  { ticker: 'HDFCBANK', name: 'HDFC Bank',                 basePrice: 1650.00, volatility: 0.015 },
-  { ticker: 'TATAMOTORS', name: 'Tata Motors',             basePrice:  980.00, volatility: 0.022 },
-  { ticker: 'ZOMATO',   name: 'Zomato',                    basePrice:  230.00, volatility: 0.035 },
-  { ticker: 'SUZLON',   name: 'Suzlon Energy',             basePrice:   65.00, volatility: 0.045 },
+  { ticker: 'RELIANCE',   name: 'Reliance Industries',       basePrice: 2949.98, volatility: 0.012 },
+  { ticker: 'TCS',        name: 'Tata Consultancy Services', basePrice: 4149.98, volatility: 0.010 },
+  { ticker: 'HDFCBANK',   name: 'HDFC Bank',                 basePrice: 1650.04, volatility: 0.015 },
+  { ticker: 'TATAMOTORS', name: 'Tata Motors',             basePrice:  979.98, volatility: 0.022 },
+  { ticker: 'ZOMATO',     name: 'Zomato',                    basePrice:  230.01, volatility: 0.035 },
+  { ticker: 'SUZLON',     name: 'Suzlon Energy',             basePrice:   65.00, volatility: 0.045 },
 ];
 
 // ─── News Headlines (Indian Market) ─────────────────────────────────────────
@@ -44,8 +44,7 @@ function generateRoomCode() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
-function createRoomState(hostId, hostName, durationMinutes = 10) {
-  // Deep-copy stocks with live prices
+function createRoomState(hostId, hostName, modeOrMinutes = '10') {
   const stocks = STOCK_CATALOG.map(s => ({
     ...s,
     price: s.basePrice,
@@ -54,16 +53,22 @@ function createRoomState(hostId, hostName, durationMinutes = 10) {
     newsDuration: 0,
   }));
 
-  const validMinutes = [10, 20, 30].includes(Number(durationMinutes)) ? Number(durationMinutes) : 10;
-  const durationSeconds = validMinutes * 60;
+  const isMatch = String(modeOrMinutes).toLowerCase() === 'match';
+  const validMinutes = [10, 20, 30].includes(Number(modeOrMinutes)) ? Number(modeOrMinutes) : 10;
+  const durationSeconds = isMatch ? 600 : validMinutes * 60; // 600s per round for match
 
   return {
     hostId,
-    players: new Map(),  // socketId → { name, cash, portfolio: { ticker: qty } }
+    hostName,
+    mode: isMatch ? 'match' : 'standard',
+    players: new Map(), // socketId → { name, cash, portfolio: { ticker: { qty, avgPrice } } }
     stocks,
-    durationMinutes: validMinutes,
+    durationMinutes: isMatch ? 40 : validMinutes,
     durationSeconds,
     timer: durationSeconds,
+    phase: isMatch ? 'round1' : 'active', // match phases: round1, break1, round2, break2, round3, finished
+    phaseTimer: isMatch ? 600 : durationSeconds,
+    isMarketFrozen: false,
     tickInterval: null,
     newsInterval: null,
     gameStarted: false,
@@ -71,8 +76,14 @@ function createRoomState(hostId, hostName, durationMinutes = 10) {
 }
 
 function addPlayer(room, socketId, name) {
+  // If match mode and player is host, host is Master (not a player)
+  if (room.mode === 'match' && socketId === room.hostId) {
+    return;
+  }
   const portfolio = {};
-  STOCK_CATALOG.forEach(s => { portfolio[s.ticker] = 0; });
+  STOCK_CATALOG.forEach(s => {
+    portfolio[s.ticker] = { qty: 0, avgPrice: 0 };
+  });
   room.players.set(socketId, { name, cash: 1000000, portfolio });
 }
 
@@ -84,30 +95,29 @@ function getPlayerList(room) {
 
 // ─── Market Engine ──────────────────────────────────────────────────────────
 function tickPrices(room) {
-  room.stocks.forEach(stock => {
-    if (stock.newsDuration > 0) {
-      // Small follow-through (0.5% to 1% per tick) in direction of news
-      const followThrough = (0.005 + Math.random() * 0.005) * stock.activeSentiment;
-      stock.price = stock.price * (1 + followThrough);
-      stock.newsDuration--;
-    } else {
-      // Standard background noise clamped strictly to ±0.5% to ±1.5% range
-      const mag = 0.005 + Math.random() * 0.010;
-      const noise = Math.random() < 0.5 ? mag : -mag;
-      
-      // Mean reversion toward base price (gentle pull keeping unprovoked drift within ~5%)
-      const reversion = (stock.basePrice - stock.price) * 0.03;
-      stock.price = stock.price * (1 + noise) + reversion;
-      
-      // Clamp overall unprovoked drift to ±5% of base price
-      const minPrice = stock.basePrice * 0.88;
-      const maxPrice = stock.basePrice * 1.12;
-      stock.price = Math.min(Math.max(stock.price, minPrice), maxPrice);
-    }
+  if (room.isMarketFrozen) return;
 
-    stock.price = Math.max(stock.price, 1);
-    stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
-  });
+  if (room.mode === 'standard') {
+    room.stocks.forEach(stock => {
+      if (stock.newsDuration > 0) {
+        const followThrough = (0.005 + Math.random() * 0.005) * stock.activeSentiment;
+        stock.price = stock.price * (1 + followThrough);
+        stock.newsDuration--;
+      } else {
+        const mag = 0.005 + Math.random() * 0.010;
+        const noise = Math.random() < 0.5 ? mag : -mag;
+        const reversion = (stock.basePrice - stock.price) * 0.03;
+        stock.price = stock.price * (1 + noise) + reversion;
+        
+        const minPrice = stock.basePrice * 0.88;
+        const maxPrice = stock.basePrice * 1.12;
+        stock.price = Math.min(Math.max(stock.price, minPrice), maxPrice);
+      }
+
+      stock.price = Math.max(stock.price, 1);
+      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+    });
+  }
 }
 
 function broadcastPrices(roomCode, room) {
@@ -120,17 +130,41 @@ function broadcastPrices(roomCode, room) {
   io.to(roomCode).emit('priceUpdate', { stocks: stockData });
 }
 
-// ─── Leaderboard ────────────────────────────────────────────────────────────
+// ─── Leaderboard & Portfolios ────────────────────────────────────────────────
 function calculateNetWorth(player, stocks) {
   let stockValue = 0;
+  let portfolioDetails = {};
+
   stocks.forEach(s => {
-    const qty = player.portfolio[s.ticker] || 0;
+    const item = player.portfolio[s.ticker] || { qty: 0, avgPrice: 0 };
+    const qty = item.qty || 0;
+    const avgPrice = item.avgPrice || 0;
+    
+    // stockValue represents market value of long holdings (or liability of short)
     stockValue += qty * s.price;
+
+    let pnl = 0;
+    if (qty > 0) {
+      pnl = (s.price - avgPrice) * qty;
+    } else if (qty < 0) {
+      pnl = (avgPrice - s.price) * Math.abs(qty);
+    }
+
+    portfolioDetails[s.ticker] = {
+      qty,
+      avgPrice: Math.round(avgPrice * 100) / 100,
+      currentPrice: Math.round(s.price * 100) / 100,
+      pnl: Math.round(pnl * 100) / 100,
+    };
   });
+
+  const netWorth = player.cash + stockValue;
+
   return {
     cash: Math.round(player.cash * 100) / 100,
     stockValue: Math.round(stockValue * 100) / 100,
-    netWorth: Math.round((player.cash + stockValue) * 100) / 100,
+    netWorth: Math.round(netWorth * 100) / 100,
+    portfolioDetails,
   };
 }
 
@@ -142,91 +176,182 @@ function broadcastLeaderboard(roomCode, room) {
   });
   entries.sort((a, b) => b.netWorth - a.netWorth);
   entries.forEach((e, i) => { e.rank = i + 1; });
-  io.to(roomCode).emit('leaderboard', entries);
+
+  if (room.mode === 'standard') {
+    io.to(roomCode).emit('leaderboard', entries);
+  } else if (room.mode === 'match') {
+    // Blind trading: only send full leaderboard to Master (host)
+    io.to(room.hostId).emit('leaderboard', entries);
+  }
 }
 
 function broadcastPortfolios(roomCode, room) {
   room.players.forEach((player, id) => {
-    const { cash, stockValue, netWorth } = calculateNetWorth(player, room.stocks);
+    const { cash, stockValue, netWorth, portfolioDetails } = calculateNetWorth(player, room.stocks);
     io.to(id).emit('portfolioUpdate', {
       cash,
       stockValue,
       netWorth,
-      portfolio: { ...player.portfolio },
+      portfolioDetails,
     });
   });
 }
 
 // ─── News Engine ────────────────────────────────────────────────────────────
 function fireNewsEvent(roomCode, room) {
+  if (room.isMarketFrozen) return;
+
   const event = NEWS_EVENTS[Math.floor(Math.random() * NEWS_EVENTS.length)];
   
-  // Broadcast news headline immediately
-  io.to(roomCode).emit('newsFlash', {
-    headline: event.headline,
-    ticker: event.ticker,
-    sentiment: event.sentiment,
-  });
+  if (room.mode === 'standard') {
+    io.to(roomCode).emit('newsFlash', {
+      headline: event.headline,
+      ticker: event.ticker,
+      sentiment: event.sentiment,
+      delaySeconds: 3,
+    });
 
-  // Delay actual price shock execution by exactly 3 seconds (3000ms)
-  setTimeout(() => {
-    if (!rooms.has(roomCode)) return;
-    const stock = room.stocks.find(s => s.ticker === event.ticker);
-    if (stock) {
-      // Execute news impact move (capped ±5% to ±7%)
-      stock.price = stock.price * (1 + event.multiplier);
-      
-      // Clamp overall total movement cap to max ±12% of base price
-      const minLimit = stock.basePrice * 0.88;
-      const maxLimit = stock.basePrice * 1.12;
-      stock.price = Math.min(Math.max(stock.price, minLimit), maxLimit);
-      
-      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
-      stock.activeSentiment = Math.sign(event.multiplier);
-      stock.newsDuration = 3; // 3 follow-through ticks
-      
-      broadcastPrices(roomCode, room);
-    }
-  }, 3000);
+    setTimeout(() => {
+      if (!rooms.has(roomCode)) return;
+      const stock = room.stocks.find(s => s.ticker === event.ticker);
+      if (stock && !room.isMarketFrozen) {
+        stock.price = stock.price * (1 + event.multiplier);
+        const minLimit = stock.basePrice * 0.88;
+        const maxLimit = stock.basePrice * 1.12;
+        stock.price = Math.min(Math.max(stock.price, minLimit), maxLimit);
+        stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+        stock.activeSentiment = Math.sign(event.multiplier);
+        stock.newsDuration = 3;
+        broadcastPrices(roomCode, room);
+      }
+    }, 3000);
+  } else if (room.mode === 'match') {
+    // Match Mode: 5-second front-running window delay
+    io.to(roomCode).emit('newsFlash', {
+      headline: event.headline,
+      ticker: event.ticker,
+      sentiment: event.sentiment,
+      delaySeconds: 5,
+    });
+
+    setTimeout(() => {
+      if (!rooms.has(roomCode)) return;
+      const stock = room.stocks.find(s => s.ticker === event.ticker);
+      if (stock && !room.isMarketFrozen) {
+        stock.price = stock.price * (1 + event.multiplier);
+        stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+        broadcastPrices(roomCode, room);
+        broadcastPortfolios(roomCode, room);
+      }
+    }, 5000);
+  }
 }
 
-// ─── Game Loop ──────────────────────────────────────────────────────────────
+// ─── Game Loop & Phase Progression Engine ───────────────────────────────────
 function startGame(roomCode, room) {
   room.gameStarted = true;
-  room.timer = room.durationSeconds || 600;
 
-  // Send initial state
+  if (room.mode === 'standard') {
+    room.timer = room.durationSeconds || 600;
+  } else if (room.mode === 'match') {
+    room.phase = 'round1';
+    room.phaseTimer = 600; // Round 1: 10 mins
+    room.isMarketFrozen = false;
+  }
+
   const stockData = room.stocks.map(s => ({
     ticker: s.ticker,
     name: s.name,
     price: Math.round(s.price * 100) / 100,
     changePercent: 0,
   }));
-  io.to(roomCode).emit('gameStarted', { stocks: stockData, timer: room.timer });
 
-  // Send initial portfolios
+  io.to(roomCode).emit('gameStarted', {
+    mode: room.mode,
+    stocks: stockData,
+    timer: room.mode === 'standard' ? room.timer : room.phaseTimer,
+    phase: room.phase,
+    isMarketFrozen: room.isMarketFrozen,
+  });
+
   broadcastPortfolios(roomCode, room);
+  broadcastLeaderboard(roomCode, room);
 
-  // 1-second tick: prices, leaderboard, timer
+  // 1-second Tick Loop
   room.tickInterval = setInterval(() => {
-    room.timer--;
-    tickPrices(room);
-    broadcastPrices(roomCode, room);
-    broadcastLeaderboard(roomCode, room);
-    broadcastPortfolios(roomCode, room);
-    io.to(roomCode).emit('timerUpdate', { remaining: room.timer });
+    if (room.mode === 'standard') {
+      room.timer--;
+      tickPrices(room);
+      broadcastPrices(roomCode, room);
+      broadcastLeaderboard(roomCode, room);
+      broadcastPortfolios(roomCode, room);
+      io.to(roomCode).emit('timerUpdate', { remaining: room.timer, phase: 'standard', isMarketFrozen: false });
 
-    if (room.timer <= 0) {
-      endGame(roomCode, room);
+      if (room.timer <= 0) {
+        endGame(roomCode, room);
+      }
+    } else if (room.mode === 'match') {
+      room.phaseTimer--;
+
+      if (!room.isMarketFrozen) {
+        broadcastPrices(roomCode, room);
+      }
+      broadcastLeaderboard(roomCode, room);
+      broadcastPortfolios(roomCode, room);
+
+      io.to(roomCode).emit('timerUpdate', {
+        remaining: room.phaseTimer,
+        phase: room.phase,
+        isMarketFrozen: room.isMarketFrozen,
+      });
+
+      // Match Phase Progression
+      if (room.phaseTimer <= 0) {
+        advanceMatchPhase(roomCode, room);
+      }
     }
   }, 1000);
 
-  // News every 15 seconds
+  // News Interval
+  const newsDelay = room.mode === 'match' ? 10000 : 15000;
   room.newsInterval = setInterval(() => {
-    if (room.timer > 5) { // don't fire news in last 5 seconds
+    if (room.mode === 'standard' && room.timer > 5) {
+      fireNewsEvent(roomCode, room);
+    } else if (room.mode === 'match' && !room.isMarketFrozen && room.phaseTimer > 5) {
       fireNewsEvent(roomCode, room);
     }
-  }, 15000);
+  }, newsDelay);
+}
+
+function advanceMatchPhase(roomCode, room) {
+  if (room.phase === 'round1') {
+    room.phase = 'break1';
+    room.phaseTimer = 300; // Break 1: 5 mins
+    room.isMarketFrozen = true;
+  } else if (room.phase === 'break1') {
+    room.phase = 'round2';
+    room.phaseTimer = 600; // Round 2: 10 mins
+    room.isMarketFrozen = false;
+  } else if (room.phase === 'round2') {
+    room.phase = 'break2';
+    room.phaseTimer = 300; // Break 2: 5 mins
+    room.isMarketFrozen = true;
+  } else if (room.phase === 'break2') {
+    room.phase = 'round3';
+    room.phaseTimer = 600; // Round 3: 10 mins
+    room.isMarketFrozen = false;
+  } else if (room.phase === 'round3') {
+    room.phase = 'finished';
+    endGame(roomCode, room);
+    return;
+  }
+
+  io.to(roomCode).emit('phaseChanged', {
+    phase: room.phase,
+    phaseTimer: room.phaseTimer,
+    isMarketFrozen: room.isMarketFrozen,
+  });
+  console.log(`⏱️ Match ${roomCode} phase changed to ${room.phase}`);
 }
 
 function endGame(roomCode, room) {
@@ -243,7 +368,6 @@ function endGame(roomCode, room) {
 
   io.to(roomCode).emit('gameOver', { standings });
 
-  // Clean up room after a delay
   setTimeout(() => { rooms.delete(roomCode); }, 60000);
 }
 
@@ -262,9 +386,14 @@ io.on('connection', (socket) => {
     socket.join(roomCode);
     socket.roomCode = roomCode;
 
-    socket.emit('roomCreated', { roomCode, durationMinutes: room.durationMinutes });
+    socket.emit('roomCreated', {
+      roomCode,
+      mode: room.mode,
+      isMaster: room.mode === 'match' && socket.id === room.hostId,
+      durationMinutes: room.durationMinutes,
+    });
     io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
-    console.log(`🏠 Room ${roomCode} created by ${playerName} (${room.durationMinutes} mins)`);
+    console.log(`🏠 Room ${roomCode} created by ${playerName} (Mode: ${room.mode})`);
   });
 
   socket.on('joinRoom', ({ roomCode, playerName }) => {
@@ -277,16 +406,16 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: 'Game already in progress. Cannot join.' });
       return;
     }
-    if (room.players.has(socket.id)) {
-      socket.emit('error', { message: 'You are already in this room.' });
-      return;
-    }
 
     addPlayer(room, socket.id, playerName);
     socket.join(roomCode);
     socket.roomCode = roomCode;
 
-    socket.emit('roomJoined', { roomCode });
+    socket.emit('roomJoined', {
+      roomCode,
+      mode: room.mode,
+      isMaster: room.mode === 'match' && socket.id === room.hostId,
+    });
     io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
     console.log(`👤 ${playerName} joined ${roomCode}`);
   });
@@ -300,10 +429,37 @@ io.on('connection', (socket) => {
     }
     if (room.gameStarted) return;
 
-    console.log(`🎮 Game started in ${roomCode}`);
+    console.log(`🎮 Game started in ${roomCode} (Mode: ${room.mode})`);
     startGame(roomCode, room);
   });
 
+  // Master Price Manipulation (During Breaks in Match Mode)
+  socket.on('masterUpdatePrice', ({ roomCode, ticker, newPrice }) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.mode !== 'match') return;
+    if (socket.id !== room.hostId) {
+      socket.emit('error', { message: 'Only the Master can update stock prices.' });
+      return;
+    }
+    if (!room.isMarketFrozen) {
+      socket.emit('error', { message: 'Prices can only be edited during break phases!' });
+      return;
+    }
+
+    const stock = room.stocks.find(s => s.ticker === ticker);
+    const parsedPrice = parseFloat(newPrice);
+    if (stock && !isNaN(parsedPrice) && parsedPrice > 0) {
+      stock.price = Math.round(parsedPrice * 100) / 100;
+      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+      
+      broadcastPrices(roomCode, room);
+      broadcastPortfolios(roomCode, room);
+      broadcastLeaderboard(roomCode, room);
+      console.log(`🛠️ Master updated ${ticker} price to ₹${stock.price}`);
+    }
+  });
+
+  // Trade Execution (BUY / SELL with Short Selling in Match Mode)
   socket.on('executeTrade', ({ roomCode, ticker, action, quantity }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) {
@@ -311,9 +467,14 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (room.isMarketFrozen) {
+      socket.emit('tradeResult', { success: false, message: 'Market is frozen during breaks!' });
+      return;
+    }
+
     const player = room.players.get(socket.id);
     if (!player) {
-      socket.emit('tradeResult', { success: false, message: 'Player not found.' });
+      socket.emit('tradeResult', { success: false, message: 'Master cannot execute trades.' });
       return;
     }
 
@@ -330,43 +491,98 @@ io.on('connection', (socket) => {
     }
 
     const totalCost = stock.price * qty;
+    if (!player.portfolio[ticker]) {
+      player.portfolio[ticker] = { qty: 0, avgPrice: 0 };
+    }
+
+    const currentItem = player.portfolio[ticker];
+    const heldQty = currentItem.qty || 0;
+    const heldAvg = currentItem.avgPrice || 0;
 
     if (action === 'BUY') {
       if (player.cash < totalCost) {
         socket.emit('tradeResult', {
           success: false,
-          message: `Insufficient funds. Need ₹${totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })} but only have ₹${player.cash.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
+          message: `Insufficient funds. Need ₹${totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
         });
         return;
       }
+
       player.cash -= totalCost;
-      player.portfolio[ticker] = (player.portfolio[ticker] || 0) + qty;
+
+      if (heldQty >= 0) {
+        const newQty = heldQty + qty;
+        const newAvg = ((heldQty * heldAvg) + totalCost) / newQty;
+        currentItem.qty = newQty;
+        currentItem.avgPrice = newAvg;
+      } else {
+        // Covering a short position
+        const absShort = Math.abs(heldQty);
+        if (qty <= absShort) {
+          currentItem.qty = heldQty + qty; // e.g. -100 + 40 = -60
+          if (currentItem.qty === 0) currentItem.avgPrice = 0;
+        } else {
+          const longQty = qty - absShort;
+          currentItem.qty = longQty;
+          currentItem.avgPrice = stock.price;
+        }
+      }
+
       socket.emit('tradeResult', {
         success: true,
         message: `Bought ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
-        cash: Math.round(player.cash * 100) / 100,
-        portfolio: { ...player.portfolio },
       });
+
     } else if (action === 'SELL') {
-      const held = player.portfolio[ticker] || 0;
-      if (held < qty) {
+      if (room.mode === 'standard') {
+        // Standard Mode: No short selling allowed
+        if (heldQty < qty) {
+          socket.emit('tradeResult', {
+            success: false,
+            message: `Insufficient shares. You hold ${heldQty} shares of ${ticker}.`,
+          });
+          return;
+        }
+
+        player.cash += totalCost;
+        currentItem.qty = heldQty - qty;
+        if (currentItem.qty === 0) currentItem.avgPrice = 0;
+
         socket.emit('tradeResult', {
-          success: false,
-          message: `Insufficient shares. You hold ${held} shares of ${ticker}.`,
+          success: true,
+          message: `Sold ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
         });
-        return;
+
+      } else if (room.mode === 'match') {
+        // Match Mode: Short selling allowed!
+        player.cash += totalCost;
+
+        if (heldQty > 0) {
+          if (qty <= heldQty) {
+            currentItem.qty = heldQty - qty;
+            if (currentItem.qty === 0) currentItem.avgPrice = 0;
+          } else {
+            const shortQty = qty - heldQty;
+            currentItem.qty = -shortQty;
+            currentItem.avgPrice = stock.price;
+          }
+        } else {
+          // Adding to existing short position
+          const newShortQty = heldQty - qty; // e.g. -50 - 50 = -100
+          const newAvg = ((Math.abs(heldQty) * heldAvg) + totalCost) / Math.abs(newShortQty);
+          currentItem.qty = newShortQty;
+          currentItem.avgPrice = newAvg;
+        }
+
+        socket.emit('tradeResult', {
+          success: true,
+          message: `Sold/Short ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
+        });
       }
-      player.cash += totalCost;
-      player.portfolio[ticker] -= qty;
-      socket.emit('tradeResult', {
-        success: true,
-        message: `Sold ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
-        cash: Math.round(player.cash * 100) / 100,
-        portfolio: { ...player.portfolio },
-      });
-    } else {
-      socket.emit('tradeResult', { success: false, message: 'Invalid action.' });
     }
+
+    broadcastPortfolios(roomCode, room);
+    broadcastLeaderboard(roomCode, room);
   });
 
   socket.on('disconnect', () => {
@@ -379,12 +595,11 @@ io.on('connection', (socket) => {
     room.players.delete(socket.id);
     io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
 
-    // If room is empty, clean up
-    if (room.players.size === 0) {
+    if (room.players.size === 0 && socket.id === room.hostId) {
       clearInterval(room.tickInterval);
       clearInterval(room.newsInterval);
       rooms.delete(roomCode);
-      console.log(`🗑️  Room ${roomCode} deleted (empty)`);
+      console.log(`🗑️  Room ${roomCode} deleted (host left)`);
     }
   });
 });
@@ -394,3 +609,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\n🏦 MockEx Stock Exchange running on http://localhost:${PORT}\n`);
 });
+
