@@ -463,6 +463,38 @@ io.on('connection', (socket) => {
     console.log(`⏯️ Room ${roomCode} paused: ${room.isPaused}`);
   });
 
+  socket.on('master:skipToBreak', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted || room.mode !== 'match') return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can skip round.' });
+    
+    if (room.phase === 'round1') {
+      room.phase = 'break1';
+      room.phaseTimer = 300;
+      room.isMarketFrozen = true;
+    } else if (room.phase === 'round2') {
+      room.phase = 'break2';
+      room.phaseTimer = 300;
+      room.isMarketFrozen = true;
+    } else if (room.phase === 'round3') {
+      room.phase = 'finished';
+      endGame(roomCode, room);
+      return;
+    } else {
+      return socket.emit('error', { message: 'Round is already in a break window.' });
+    }
+
+    io.to(roomCode).emit('phaseChanged', {
+      phase: room.phase,
+      phaseTimer: room.phaseTimer,
+      isMarketFrozen: room.isMarketFrozen,
+    });
+    io.to(roomCode).emit('matchStateUpdated', {
+      message: `Skipped to ${room.phase.toUpperCase()} by Master!`,
+    });
+    console.log(`⏩ Room ${roomCode} skipped to ${room.phase}`);
+  });
+
   socket.on('master:endBreak', ({ roomCode }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
@@ -505,7 +537,7 @@ io.on('connection', (socket) => {
     endGame(roomCode, room);
   });
 
-  // Master Price Manipulation (During Breaks in Match Mode)
+  // Master Price Manipulation (During Breaks OR Paused in Match Mode)
   socket.on('masterUpdatePrice', ({ roomCode, ticker, newPrice }) => {
     const room = rooms.get(roomCode);
     if (!room || room.mode !== 'match') return;
@@ -513,8 +545,8 @@ io.on('connection', (socket) => {
       socket.emit('error', { message: 'Only the Master can update stock prices.' });
       return;
     }
-    if (!room.isMarketFrozen) {
-      socket.emit('error', { message: 'Prices can only be edited during break phases!' });
+    if (!room.isMarketFrozen && !room.isPaused) {
+      socket.emit('error', { message: 'Prices can only be edited during break phases or when paused!' });
       return;
     }
 

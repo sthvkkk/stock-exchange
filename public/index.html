@@ -241,23 +241,22 @@
             <div>
                 <span class="text-xs uppercase font-bold text-blue-400 tracking-wider">Host Command Toolbar</span>
                 <h3 class="text-lg font-bold text-white uppercase">Master Control Suite</h3>
-                <p class="text-xs text-slate-400">Total lifecycle & timer control over match progression</p>
+                <p class="text-xs text-slate-400">Total lifecycle and timer control over match progression</p>
             </div>
             <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                <button id="btnMasterPause" onclick="masterTogglePause()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
-                    <span id="masterPauseIcon">⏸️</span>
+                <button id="btnMasterPause" onclick="masterTogglePause()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span id="masterPauseLabel">Pause Round</span>
                 </button>
-                <button id="btnMasterEndBreak" onclick="masterEndBreak()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
-                    <span>⏩</span>
+                <button id="btnMasterSkipBreak" onclick="masterSkipToBreak()" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
+                    <span>Skip Round to Next Break</span>
+                </button>
+                <button id="btnMasterEndBreak" onclick="masterEndBreak()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span>End Break Early</span>
                 </button>
-                <button id="btnMasterExtendBreak" onclick="masterExtendBreak()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
-                    <span>⌛</span>
-                    <span>Extend Break (+5m)</span>
+                <button id="btnMasterExtendBreak" onclick="masterExtendBreak()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
+                    <span>Extend Break (+5 Mins)</span>
                 </button>
-                <button id="btnMasterEndRound" onclick="masterEndRound()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
-                    <span>🛑</span>
+                <button id="btnMasterEndRound" onclick="masterEndRound()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span>End Match Now</span>
                 </button>
             </div>
@@ -549,6 +548,7 @@
 
             // Master Inputs Generator
             if(isMaster && masterInputs) {
+                const canEditPrice = isMarketFrozen || isPaused;
                 stocksArray.forEach(stock => {
                     let input = document.getElementById(`masterInput-${stock.ticker}`);
                     let currentDisplay = document.getElementById(`masterCurrentPrice-${stock.ticker}`);
@@ -563,15 +563,15 @@
                                 <div class="text-xs text-slate-400">Current: <span id="masterCurrentPrice-${stock.ticker}">${formatMoney(stock.price)}</span></div>
                             </div>
                             <div class="flex gap-2 items-center">
-                                <input type="number" step="0.01" id="masterInput-${stock.ticker}" value="${stock.price}" ${!isMarketFrozen ? 'disabled' : ''} onkeydown="if(event.key==='Enter') applyMasterPrice('${stock.ticker}')" class="w-24 bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50">
-                                <button id="masterBtn-${stock.ticker}" onclick="applyMasterPrice('${stock.ticker}')" ${!isMarketFrozen ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
+                                <input type="number" step="0.01" id="masterInput-${stock.ticker}" value="${stock.price}" ${!canEditPrice ? 'disabled' : ''} onkeydown="if(event.key==='Enter') applyMasterPrice('${stock.ticker}')" class="w-24 bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50">
+                                <button id="masterBtn-${stock.ticker}" onclick="applyMasterPrice('${stock.ticker}')" ${!canEditPrice ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
                             </div>
                         `;
                         masterInputs.appendChild(div);
                     } else {
                         if(currentDisplay) currentDisplay.textContent = formatMoney(stock.price);
-                        input.disabled = !isMarketFrozen;
-                        if(btn) btn.disabled = !isMarketFrozen;
+                        input.disabled = !canEditPrice;
+                        if(btn) btn.disabled = !canEditPrice;
                         
                         // Prevent live updates from overwriting value while user is focused/editing
                         if (document.activeElement !== input) {
@@ -598,6 +598,9 @@
         // MASTER CONTROL SUITE ACTIONS
         window.masterTogglePause = () => {
             if(socket && roomCode) socket.emit('master:togglePause', { roomCode });
+        };
+        window.masterSkipToBreak = () => {
+            if(socket && roomCode) socket.emit('master:skipToBreak', { roomCode });
         };
         window.masterEndBreak = () => {
             if(socket && roomCode) socket.emit('master:endBreak', { roomCode });
