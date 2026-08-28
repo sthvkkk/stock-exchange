@@ -236,6 +236,33 @@
             </div>
         </div>
 
+        <!-- Master Control Suite Toolbar -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <span class="text-xs uppercase font-bold text-blue-400 tracking-wider">Host Command Toolbar</span>
+                <h3 class="text-lg font-bold text-white uppercase">Master Control Suite</h3>
+                <p class="text-xs text-slate-400">Total lifecycle & timer control over match progression</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                <button id="btnMasterPause" onclick="masterTogglePause()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
+                    <span id="masterPauseIcon">⏸️</span>
+                    <span id="masterPauseLabel">Pause Round</span>
+                </button>
+                <button id="btnMasterEndBreak" onclick="masterEndBreak()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
+                    <span>⏩</span>
+                    <span>End Break Early</span>
+                </button>
+                <button id="btnMasterExtendBreak" onclick="masterExtendBreak()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
+                    <span>⌛</span>
+                    <span>Extend Break (+5m)</span>
+                </button>
+                <button id="btnMasterEndRound" onclick="masterEndRound()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation">
+                    <span>🛑</span>
+                    <span>End Match Now</span>
+                </button>
+            </div>
+        </div>
+
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- Price Override Controls -->
             <div class="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
@@ -568,6 +595,22 @@
             showToast(`Updated ${ticker} price to ₹${newPrice}`, 'success');
         };
 
+        // MASTER CONTROL SUITE ACTIONS
+        window.masterTogglePause = () => {
+            if(socket && roomCode) socket.emit('master:togglePause', { roomCode });
+        };
+        window.masterEndBreak = () => {
+            if(socket && roomCode) socket.emit('master:endBreak', { roomCode });
+        };
+        window.masterExtendBreak = () => {
+            if(socket && roomCode) socket.emit('master:extendBreak', { roomCode });
+        };
+        window.masterEndRound = () => {
+            if(confirm('Are you sure you want to end the match now and force jump to final standings?')) {
+                if(socket && roomCode) socket.emit('master:endRound', { roomCode });
+            }
+        };
+
         // RENDER PORTFOLIO POSITIONS TABLE
         function renderPortfolioTable(details) {
             const tbody = document.getElementById('portfolioTableBody');
@@ -754,14 +797,18 @@
 
             socket.on('timerUpdate', (data) => {
                 isMarketFrozen = data.isMarketFrozen || false;
+                isPaused = data.isPaused || false;
                 const m = Math.floor(data.remaining / 60).toString().padStart(2, '0');
                 const s = (data.remaining % 60).toString().padStart(2, '0');
 
                 if(isMaster) {
                     document.getElementById('masterTimerDisplay').textContent = `${m}:${s}`;
-                    document.getElementById('masterPhaseLabel').textContent = data.phase ? data.phase.toUpperCase() : 'MATCH';
+                    document.getElementById('masterPhaseLabel').textContent = isPaused ? 'PAUSED' : (data.phase ? data.phase.toUpperCase() : 'MATCH');
                     const badge = document.getElementById('masterFreezeBadge');
-                    if(isMarketFrozen) {
+                    if(isPaused) {
+                        badge.textContent = 'MATCH PAUSED';
+                        badge.className = 'px-3 py-1 text-xs font-bold rounded-full bg-amber-950 text-amber-400 border border-amber-800';
+                    } else if(isMarketFrozen) {
                         badge.textContent = 'MARKET FROZEN (BREAK)';
                         badge.className = 'px-3 py-1 text-xs font-bold rounded-full bg-rose-950 text-rose-400 border border-rose-800';
                     } else {
@@ -773,7 +820,28 @@
                     document.getElementById('timerDisplay').textContent = `${m}:${s}`;
                     if(data.phase && data.phase !== 'standard') {
                         const badge = document.getElementById('arenaPhaseBadge');
-                        badge.textContent = isMarketFrozen ? `${data.phase.toUpperCase()} (FROZEN)` : data.phase.toUpperCase();
+                        badge.textContent = isPaused ? `${data.phase.toUpperCase()} (PAUSED)` : isMarketFrozen ? `${data.phase.toUpperCase()} (FROZEN)` : data.phase.toUpperCase();
+                    }
+                }
+            });
+
+            socket.on('matchStateUpdated', (data) => {
+                if(data.message) showToast(data.message, data.isPaused ? 'error' : 'success');
+                if(typeof data.isPaused !== 'undefined') {
+                    isPaused = data.isPaused;
+                    const icon = document.getElementById('masterPauseIcon');
+                    const label = document.getElementById('masterPauseLabel');
+                    const btn = document.getElementById('btnMasterPause');
+                    if(icon && label && btn) {
+                        if(isPaused) {
+                            icon.textContent = '▶️';
+                            label.textContent = 'Resume Round';
+                            btn.className = 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation';
+                        } else {
+                            icon.textContent = '⏸️';
+                            label.textContent = 'Pause Round';
+                            btn.className = 'bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation';
+                        }
                     }
                 }
             });

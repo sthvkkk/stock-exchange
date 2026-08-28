@@ -272,6 +272,7 @@ function startGame(roomCode, room) {
     timer: room.mode === 'standard' ? room.timer : room.phaseTimer,
     phase: room.phase,
     isMarketFrozen: room.isMarketFrozen,
+    isPaused: room.isPaused || false,
   });
 
   broadcastPortfolios(roomCode, room);
@@ -279,13 +280,24 @@ function startGame(roomCode, room) {
 
   // 1-second Tick Loop
   room.tickInterval = setInterval(() => {
+    if (room.isPaused) {
+      // Game paused by Master: broadcast static timer & pause state
+      io.to(roomCode).emit('timerUpdate', {
+        remaining: room.mode === 'standard' ? room.timer : room.phaseTimer,
+        phase: room.phase,
+        isMarketFrozen: true,
+        isPaused: true,
+      });
+      return;
+    }
+
     if (room.mode === 'standard') {
       room.timer--;
       tickPrices(room);
       broadcastPrices(roomCode, room);
       broadcastLeaderboard(roomCode, room);
       broadcastPortfolios(roomCode, room);
-      io.to(roomCode).emit('timerUpdate', { remaining: room.timer, phase: 'standard', isMarketFrozen: false });
+      io.to(roomCode).emit('timerUpdate', { remaining: room.timer, phase: 'standard', isMarketFrozen: false, isPaused: false });
 
       if (room.timer <= 0) {
         endGame(roomCode, room);
@@ -303,6 +315,7 @@ function startGame(roomCode, room) {
         remaining: room.phaseTimer,
         phase: room.phase,
         isMarketFrozen: room.isMarketFrozen,
+        isPaused: false,
       });
 
       // Match Phase Progression
@@ -315,6 +328,7 @@ function startGame(roomCode, room) {
   // News Interval
   const newsDelay = room.mode === 'match' ? 10000 : 15000;
   room.newsInterval = setInterval(() => {
+    if (room.isPaused) return;
     if (room.mode === 'standard' && room.timer > 5) {
       fireNewsEvent(roomCode, room);
     } else if (room.mode === 'match' && !room.isMarketFrozen && room.phaseTimer > 5) {
@@ -433,6 +447,64 @@ io.on('connection', (socket) => {
     startGame(roomCode, room);
   });
 
+  // Master Control Suite Handlers
+  socket.on('master:togglePause', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted) return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can pause/resume.' });
+
+    room.isPaused = !room.isPaused;
+    io.to(roomCode).emit('matchStateUpdated', {
+      isPaused: room.isPaused,
+      isMarketFrozen: room.isMarketFrozen || room.isPaused,
+      phase: room.phase,
+      message: room.isPaused ? 'Match PAUSED by Master.' : 'Match RESUMED by Master.',
+    });
+    console.log(`⏯️ Room ${roomCode} paused: ${room.isPaused}`);
+  });
+
+  socket.on('master:endBreak', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted || room.mode !== 'match') return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can end break.' });
+    if (!room.phase.startsWith('break')) {
+      return socket.emit('error', { message: 'Can only end break early during a break phase!' });
+    }
+
+    advanceMatchPhase(roomCode, room);
+  });
+
+  socket.on('master:extendBreak', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted || room.mode !== 'match') return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can extend break.' });
+    if (!room.phase.startsWith('break')) {
+      return socket.emit('error', { message: 'Can only extend break during a break phase!' });
+    }
+
+    room.phaseTimer += 300; // Add +5 minutes
+    io.to(roomCode).emit('timerUpdate', {
+      remaining: room.phaseTimer,
+      phase: room.phase,
+      isMarketFrozen: room.isMarketFrozen,
+      isPaused: room.isPaused,
+    });
+    io.to(roomCode).emit('matchStateUpdated', {
+      message: 'Break extended by +5 minutes by Master!',
+    });
+    console.log(`⌛ Room ${roomCode} break extended +300s`);
+  });
+
+  socket.on('master:endRound', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted) return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can end match.' });
+
+    console.log(`🛑 Match ${roomCode} terminated early by Master.`);
+    room.phase = 'finished';
+    endGame(roomCode, room);
+  });
+
   // Master Price Manipulation (During Breaks in Match Mode)
   socket.on('masterUpdatePrice', ({ roomCode, ticker, newPrice }) => {
     const room = rooms.get(roomCode);
@@ -464,6 +536,11 @@ io.on('connection', (socket) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) {
       socket.emit('tradeResult', { success: false, message: 'Game not active.' });
+      return;
+    }
+
+    if (room.isPaused) {
+      socket.emit('tradeResult', { success: false, message: 'Game is currently paused by the Master.' });
       return;
     }
 
