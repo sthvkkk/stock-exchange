@@ -592,6 +592,9 @@
             const newPrice = parseFloat(input.value);
             if(isNaN(newPrice) || newPrice <= 0) return showToast('Enter valid price');
             socket.emit('masterUpdatePrice', { roomCode, ticker, newPrice });
+            socket.emit('master:setPrice', { roomCode, ticker, newPrice });
+            const currentDisplay = document.getElementById(`masterCurrentPrice-${ticker}`);
+            if(currentDisplay) currentDisplay.textContent = formatMoney(newPrice);
             showToast(`Updated ${ticker} price to ₹${newPrice}`, 'success');
         };
 
@@ -832,20 +835,18 @@
                 if(data.message) showToast(data.message, data.isPaused ? 'error' : 'success');
                 if(typeof data.isPaused !== 'undefined') {
                     isPaused = data.isPaused;
-                    const icon = document.getElementById('masterPauseIcon');
                     const label = document.getElementById('masterPauseLabel');
                     const btn = document.getElementById('btnMasterPause');
-                    if(icon && label && btn) {
+                    if(label && btn) {
                         if(isPaused) {
-                            icon.textContent = '▶️';
                             label.textContent = 'Resume Round';
-                            btn.className = 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation';
+                            btn.className = 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation';
                         } else {
-                            icon.textContent = '⏸️';
                             label.textContent = 'Pause Round';
-                            btn.className = 'bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-1.5 touch-manipulation';
+                            btn.className = 'bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation';
                         }
                     }
+                    renderStocks(Object.values(currentStocks));
                 }
             });
 

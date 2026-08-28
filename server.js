@@ -538,7 +538,7 @@ io.on('connection', (socket) => {
   });
 
   // Master Price Manipulation (During Breaks OR Paused in Match Mode)
-  socket.on('masterUpdatePrice', ({ roomCode, ticker, newPrice }) => {
+  const handleMasterPriceUpdate = ({ roomCode, ticker, newPrice }) => {
     const room = rooms.get(roomCode);
     if (!room || room.mode !== 'match') return;
     if (socket.id !== room.hostId) {
@@ -561,7 +561,10 @@ io.on('connection', (socket) => {
       broadcastLeaderboard(roomCode, room);
       console.log(`🛠️ Master updated ${ticker} price to ₹${stock.price}`);
     }
-  });
+  };
+
+  socket.on('masterUpdatePrice', handleMasterPriceUpdate);
+  socket.on('master:setPrice', handleMasterPriceUpdate);
 
   // Trade Execution (BUY / SELL with Short Selling in Match Mode)
   socket.on('executeTrade', ({ roomCode, ticker, action, quantity }) => {
