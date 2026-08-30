@@ -169,10 +169,11 @@
                                 <th class="px-4 py-3">Avg Price</th>
                                 <th class="px-4 py-3">Current Price</th>
                                 <th class="px-4 py-3 text-right">Unrealized P&L</th>
+                                <th class="px-4 py-3 text-right">Action</th>
                             </tr>
                         </thead>
                         <tbody id="portfolioTableBody" class="divide-y divide-slate-800/60">
-                            <tr><td colspan="6" class="px-4 py-6 text-center text-slate-500 italic">No open stock positions</td></tr>
+                            <tr><td colspan="7" class="px-4 py-6 text-center text-slate-500 italic">No open stock positions</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -620,36 +621,65 @@
         // RENDER PORTFOLIO POSITIONS TABLE
         function renderPortfolioTable(details) {
             const tbody = document.getElementById('portfolioTableBody');
+            if(!tbody) return;
             tbody.innerHTML = '';
             
             const tickers = Object.keys(details);
-            const activeTickers = tickers.filter(t => details[t].qty !== 0);
+            let rowCount = 0;
 
-            if(activeTickers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="px-4 py-6 text-center text-slate-500 italic">No open stock positions</td></tr>';
-                return;
-            }
-
-            activeTickers.forEach(ticker => {
+            tickers.forEach(ticker => {
                 const item = details[ticker];
-                const tr = document.createElement('tr');
-                tr.className = "border-b border-slate-800/60 hover:bg-slate-800/40 cursor-pointer transition-all";
-                tr.onclick = () => openTrade(ticker);
                 
-                const isShort = item.qty < 0;
-                const pnlClass = item.pnl > 0 ? 'text-emerald-400 font-bold' : item.pnl < 0 ? 'text-rose-400 font-bold' : 'text-slate-300';
-                
-                tr.innerHTML = `
-                    <td class="px-4 py-3 font-bold text-slate-100">${ticker}</td>
-                    <td class="px-4 py-3 font-bold text-xs"><span class="${isShort ? 'text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800' : 'text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800'}">${isShort ? 'SHORT' : 'LONG'}</span></td>
-                    <td class="px-4 py-3 font-bold text-slate-200">${item.qty}</td>
-                    <td class="px-4 py-3 text-slate-300">${formatMoney(item.avgPrice)}</td>
-                    <td class="px-4 py-3 text-slate-300">${formatMoney(item.currentPrice)}</td>
-                    <td class="px-4 py-3 text-right ${pnlClass}">${item.pnl > 0 ? '+' : ''}${formatMoney(item.pnl)}</td>
-                `;
-                tbody.appendChild(tr);
+                // LONG position row
+                if(item.longQty > 0) {
+                    rowCount++;
+                    const tr = document.createElement('tr');
+                    tr.className = "border-b border-slate-800/60 hover:bg-slate-800/40 transition-all";
+                    const pnlClass = item.longPnL > 0 ? 'text-emerald-400 font-bold' : item.longPnL < 0 ? 'text-rose-400 font-bold' : 'text-slate-300';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-bold text-slate-100">${ticker}</td>
+                        <td class="px-4 py-3 font-bold text-xs"><span class="text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">LONG</span></td>
+                        <td class="px-4 py-3 font-bold text-slate-200">${item.longQty}</td>
+                        <td class="px-4 py-3 text-slate-300">${formatMoney(item.longAvgPrice)}</td>
+                        <td class="px-4 py-3 text-slate-300">${formatMoney(item.currentPrice)}</td>
+                        <td class="px-4 py-3 text-right ${pnlClass}">${item.longPnL > 0 ? '+' : ''}${formatMoney(item.longPnL)}</td>
+                        <td class="px-4 py-3 text-right">
+                            <button onclick="closePosition('${ticker}', 'LONG')" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm touch-manipulation">Close</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+
+                // SHORT position row
+                if(item.shortQty > 0) {
+                    rowCount++;
+                    const tr = document.createElement('tr');
+                    tr.className = "border-b border-slate-800/60 hover:bg-slate-800/40 transition-all";
+                    const pnlClass = item.shortPnL > 0 ? 'text-emerald-400 font-bold' : item.shortPnL < 0 ? 'text-rose-400 font-bold' : 'text-slate-300';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-bold text-slate-100">${ticker}</td>
+                        <td class="px-4 py-3 font-bold text-xs"><span class="text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-800">SHORT</span></td>
+                        <td class="px-4 py-3 font-bold text-slate-200">${item.shortQty}</td>
+                        <td class="px-4 py-3 text-slate-300">${formatMoney(item.shortAvgPrice)}</td>
+                        <td class="px-4 py-3 text-slate-300">${formatMoney(item.currentPrice)}</td>
+                        <td class="px-4 py-3 text-right ${pnlClass}">${item.shortPnL > 0 ? '+' : ''}${formatMoney(item.shortPnL)}</td>
+                        <td class="px-4 py-3 text-right">
+                            <button onclick="closePosition('${ticker}', 'SHORT')" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm touch-manipulation">Close</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
             });
+
+            if(rowCount === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-slate-500 italic">No open stock positions</td></tr>';
+            }
         }
+
+        window.closePosition = (ticker, type) => {
+            if(isMarketFrozen) return showToast('Market is frozen during breaks!');
+            if(socket && roomCode) socket.emit('closePosition', { roomCode, ticker, type });
+        };
 
         window.openTrade = (ticker) => {
             if(isMaster) return;
@@ -772,6 +802,11 @@
                     void text.offsetWidth;
                     text.classList.add('animate-marquee');
                 }, 300);
+            });
+
+            socket.on('clearNewsBanner', () => {
+                const banner = document.getElementById('newsBanner');
+                if(banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500';
             });
 
             socket.on('portfolioUpdate', (data) => {

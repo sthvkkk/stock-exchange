@@ -111,7 +111,12 @@ function addPlayer(room, socketId, name) {
   }
   const portfolio = {};
   STOCK_CATALOG.forEach(s => {
-    portfolio[s.ticker] = { qty: 0, avgPrice: 0 };
+    portfolio[s.ticker] = {
+      longQty: 0,
+      longAvgPrice: 0,
+      shortQty: 0,
+      shortAvgPrice: 0,
+    };
   });
   room.players.set(socketId, { name, cash: 1000000, portfolio });
 }
@@ -165,25 +170,31 @@ function calculateNetWorth(player, stocks) {
   let portfolioDetails = {};
 
   stocks.forEach(s => {
-    const item = player.portfolio[s.ticker] || { qty: 0, avgPrice: 0 };
-    const qty = item.qty || 0;
-    const avgPrice = item.avgPrice || 0;
-    
-    // stockValue represents market value of long holdings (or liability of short)
-    stockValue += qty * s.price;
+    const item = player.portfolio[s.ticker] || { longQty: 0, longAvgPrice: 0, shortQty: 0, shortAvgPrice: 0 };
+    const longQty = item.longQty || (item.qty > 0 ? item.qty : 0);
+    const longAvgPrice = item.longAvgPrice || (item.qty > 0 ? item.avgPrice : 0);
+    const shortQty = item.shortQty || (item.qty < 0 ? Math.abs(item.qty) : 0);
+    const shortAvgPrice = item.shortAvgPrice || (item.qty < 0 ? item.avgPrice : 0);
 
-    let pnl = 0;
-    if (qty > 0) {
-      pnl = (s.price - avgPrice) * qty;
-    } else if (qty < 0) {
-      pnl = (avgPrice - s.price) * Math.abs(qty);
-    }
+    const longValue = longQty * s.price;
+    const shortLiability = shortQty * s.price;
+
+    stockValue += (longValue - shortLiability);
+
+    const longPnL = longQty > 0 ? (s.price - longAvgPrice) * longQty : 0;
+    const shortPnL = shortQty > 0 ? (shortAvgPrice - s.price) * shortQty : 0;
 
     portfolioDetails[s.ticker] = {
-      qty,
-      avgPrice: Math.round(avgPrice * 100) / 100,
+      longQty,
+      longAvgPrice: Math.round(longAvgPrice * 100) / 100,
+      shortQty,
+      shortAvgPrice: Math.round(shortAvgPrice * 100) / 100,
       currentPrice: Math.round(s.price * 100) / 100,
-      pnl: Math.round(pnl * 100) / 100,
+      longPnL: Math.round(longPnL * 100) / 100,
+      shortPnL: Math.round(shortPnL * 100) / 100,
+      qty: longQty - shortQty,
+      avgPrice: longQty > 0 ? Math.round(longAvgPrice * 100) / 100 : Math.round(shortAvgPrice * 100) / 100,
+      pnl: Math.round((longPnL + shortPnL) * 100) / 100,
     };
   });
 
@@ -391,16 +402,26 @@ function startGame(roomCode, room) {
           }, 5000);
         }
       } else if (room.phase === 'round3' && !room.isMarketFrozen) {
-        // Round 3: Base market noise (±0.2% to ±0.5% per tick)
+        // Round 3: Baseline percentage decay / halving mechanism & small market noise (±0.2% to ±0.5%)
+        const elapsedSec = 600 - room.phaseTimer;
+        const progress = Math.min(Math.max(elapsedSec / 600, 0), 1);
+
         room.stocks.forEach(stock => {
+          const startChange = typeof stock.r3StartChangePercent === 'number' ? stock.r3StartChangePercent : stock.changePercent;
+          // Target baseline percentage decays smoothly to EXACTLY 50% of starting percentage change by minute 10:00
+          const targetChangePercent = startChange * (1 - 0.5 * progress);
+          const targetPrice = stock.basePrice * (1 + targetChangePercent / 100);
+
+          // Mean reversion pull toward target baseline
+          const driftStep = (targetPrice - stock.price) * 0.05;
+
+          // Small random market noise: ±0.2% to ±0.5% per tick
           const mag = 0.002 + Math.random() * 0.003;
           const sign = Math.random() < 0.5 ? 1 : -1;
-          const delta = stock.price * mag * sign;
-          const newPrice = Math.round((stock.price + delta) * 100) / 100;
-          
-          const minP = stock.basePrice * 0.85;
-          const maxP = stock.basePrice * 1.15;
-          stock.price = Math.min(Math.max(newPrice, minP), maxP);
+          const noise = stock.price * mag * sign;
+
+          const newPrice = Math.round((stock.price + driftStep + noise) * 100) / 100;
+          stock.price = Math.max(newPrice, 1);
           stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
         });
         broadcastPrices(roomCode, room);
@@ -453,6 +474,14 @@ function advanceMatchPhase(roomCode, room) {
     room.phase = 'round3';
     room.phaseTimer = 600; // Round 3: 10 mins
     room.isMarketFrozen = false;
+
+    // Store each stock's starting Round 3 change percentage for the halving decay
+    room.stocks.forEach(s => {
+      s.r3StartChangePercent = s.changePercent;
+    });
+
+    // Clear and hide news banner for Round 3
+    io.to(roomCode).emit('clearNewsBanner');
   } else if (room.phase === 'round3') {
     room.phase = 'finished';
     endGame(roomCode, room);
@@ -665,7 +694,7 @@ io.on('connection', (socket) => {
   socket.on('masterUpdatePrice', handleMasterPriceUpdate);
   socket.on('master:setPrice', handleMasterPriceUpdate);
 
-  // Trade Execution (BUY / SELL with Short Selling in Match Mode)
+  // Trade Execution (Separate LONG and SHORT tracking per ticker)
   socket.on('executeTrade', ({ roomCode, ticker, action, quantity }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) {
@@ -701,14 +730,12 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const totalCost = stock.price * qty;
     if (!player.portfolio[ticker]) {
-      player.portfolio[ticker] = { qty: 0, avgPrice: 0 };
+      player.portfolio[ticker] = { longQty: 0, longAvgPrice: 0, shortQty: 0, shortAvgPrice: 0 };
     }
 
-    const currentItem = player.portfolio[ticker];
-    const heldQty = currentItem.qty || 0;
-    const heldAvg = currentItem.avgPrice || 0;
+    const item = player.portfolio[ticker];
+    const totalCost = stock.price * qty;
 
     if (action === 'BUY') {
       if (player.cash < totalCost) {
@@ -720,90 +747,112 @@ io.on('connection', (socket) => {
       }
 
       player.cash -= totalCost;
-
-      if (heldQty >= 0) {
-        const newQty = heldQty + qty;
-        const newAvg = ((heldQty * heldAvg) + totalCost) / newQty;
-        currentItem.qty = newQty;
-        currentItem.avgPrice = newAvg;
-      } else {
-        // Covering a short position
-        const absShort = Math.abs(heldQty);
-        if (qty <= absShort) {
-          currentItem.qty = heldQty + qty; // e.g. -100 + 40 = -60
-          if (currentItem.qty === 0) currentItem.avgPrice = 0;
-        } else {
-          const longQty = qty - absShort;
-          currentItem.qty = longQty;
-          currentItem.avgPrice = stock.price;
-        }
-      }
+      const newLongQty = (item.longQty || 0) + qty;
+      const oldLongVal = (item.longQty || 0) * (item.longAvgPrice || 0);
+      item.longAvgPrice = (oldLongVal + totalCost) / newLongQty;
+      item.longQty = newLongQty;
 
       socket.emit('tradeResult', {
         success: true,
-        message: `Bought ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
+        message: `Bought ${qty} LONG shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
       });
 
-    } else if (action === 'SELL') {
+    } else if (action === 'SELL' || action === 'SHORT') {
       if (room.mode === 'standard') {
-        // Standard Mode: No short selling allowed
-        if (heldQty < qty) {
+        if ((item.longQty || 0) < qty) {
           socket.emit('tradeResult', {
             success: false,
-            message: `Insufficient shares. You hold ${heldQty} shares of ${ticker}.`,
+            message: `Insufficient shares. You hold ${item.longQty || 0} LONG shares of ${ticker}.`,
           });
           return;
         }
 
         player.cash += totalCost;
-        currentItem.qty = heldQty - qty;
-        if (currentItem.qty === 0) currentItem.avgPrice = 0;
+        item.longQty -= qty;
+        if (item.longQty === 0) item.longAvgPrice = 0;
 
         socket.emit('tradeResult', {
           success: true,
-          message: `Sold ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
+          message: `Sold ${qty} LONG shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
         });
 
       } else if (room.mode === 'match') {
-        // Match Mode: Short selling allowed!
-        player.cash += totalCost;
-
-        if (heldQty > 0) {
-          if (qty <= heldQty) {
-            currentItem.qty = heldQty - qty;
-            if (currentItem.qty === 0) currentItem.avgPrice = 0;
-          } else {
-            const shortQty = qty - heldQty;
-            currentItem.qty = -shortQty;
-            currentItem.avgPrice = stock.price;
-          }
-        } else {
-          // Adding to existing short position
-          const newShortQty = heldQty - qty; // e.g. -50 - 50 = -100
-          const newAvg = ((Math.abs(heldQty) * heldAvg) + totalCost) / Math.abs(newShortQty);
-          currentItem.qty = newShortQty;
-          currentItem.avgPrice = newAvg;
-        }
+        // In Match mode: SELL opens/adds to SHORT position without touching LONG position!
+        player.cash += totalCost; // Short sale proceeds
+        const newShortQty = (item.shortQty || 0) + qty;
+        const oldShortVal = (item.shortQty || 0) * (item.shortAvgPrice || 0);
+        item.shortAvgPrice = (oldShortVal + totalCost) / newShortQty;
+        item.shortQty = newShortQty;
 
         socket.emit('tradeResult', {
           success: true,
-          message: `Sold/Short ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
+          message: `Shorted ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)} (SHORT)`,
         });
       }
     }
 
     // Active Player Trade Impact (STRICTLY Round 3 Only):
     // BUY: +0.1% to +0.5% upward price pressure
-    // SELL: -0.1% to -0.5% downward price pressure
+    // SELL/SHORT: -0.1% to -0.5% downward price pressure
     if (room.mode === 'match' && room.phase === 'round3') {
       const impactPct = 0.001 + Math.random() * 0.004;
       if (action === 'BUY') {
         stock.price = Math.round(stock.price * (1 + impactPct) * 100) / 100;
-      } else if (action === 'SELL') {
+      } else if (action === 'SELL' || action === 'SHORT') {
         stock.price = Math.round(stock.price * (1 - impactPct) * 100) / 100;
       }
       stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
       broadcastPrices(roomCode, room);
+    }
+
+    broadcastPortfolios(roomCode, room);
+    broadcastLeaderboard(roomCode, room);
+  });
+
+  // Dedicated One-Click Close Position Socket Handler
+  socket.on('closePosition', ({ roomCode, ticker, type }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted) return;
+    if (room.isPaused || room.isMarketFrozen) {
+      socket.emit('tradeResult', { success: false, message: 'Market is frozen or paused.' });
+      return;
+    }
+    const player = room.players.get(socket.id);
+    if (!player) return;
+
+    const stock = room.stocks.find(s => s.ticker === ticker);
+    if (!stock) return;
+
+    const item = player.portfolio[ticker];
+    if (!item) return;
+
+    if (type === 'LONG') {
+      if ((item.longQty || 0) <= 0) {
+        socket.emit('tradeResult', { success: false, message: 'No active LONG position.' });
+        return;
+      }
+      const qtyToClose = item.longQty;
+      const revenue = stock.price * qtyToClose;
+      player.cash += revenue;
+      item.longQty = 0;
+      item.longAvgPrice = 0;
+      socket.emit('tradeResult', { success: true, message: `Closed LONG position in ${ticker} (${qtyToClose} shares)` });
+
+    } else if (type === 'SHORT') {
+      if ((item.shortQty || 0) <= 0) {
+        socket.emit('tradeResult', { success: false, message: 'No active SHORT position.' });
+        return;
+      }
+      const qtyToClose = item.shortQty;
+      const cost = stock.price * qtyToClose;
+      if (player.cash < cost) {
+        socket.emit('tradeResult', { success: false, message: `Insufficient cash (₹${cost.toFixed(2)}) to close SHORT position.` });
+        return;
+      }
+      player.cash -= cost;
+      item.shortQty = 0;
+      item.shortAvgPrice = 0;
+      socket.emit('tradeResult', { success: true, message: `Closed SHORT position in ${ticker} (${qtyToClose} shares)` });
     }
 
     broadcastPortfolios(roomCode, room);
