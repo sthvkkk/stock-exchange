@@ -763,10 +763,11 @@
                 text.classList.remove('animate-marquee');
                 text.classList.add('opacity-0');
                 
+                const tickerPrefix = data.ticker ? `${data.ticker} — ` : '';
                 const delayText = data.delaySeconds ? ` [Price impact in ${data.delaySeconds}s]` : '';
                 
                 setTimeout(() => {
-                    text.textContent = `BREAKING: ${data.ticker} — ${data.headline}${delayText}`;
+                    text.textContent = `BREAKING: ${tickerPrefix}${data.headline}${delayText}`;
                     text.classList.remove('opacity-0');
                     void text.offsetWidth;
                     text.classList.add('animate-marquee');

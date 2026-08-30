@@ -37,6 +37,30 @@ const NEWS_EVENTS = [
   { headline: 'Zomato Q3 margins squeeze — profitability concerns resurface!',               ticker: 'ZOMATO',      sentiment: 'bearish',  multiplier: -0.065 },
 ];
 
+// Exact 20 Headlines & Impacts for Match Round 2
+const ROUND2_NEWS_ITEMS = [
+  { headline: "TCS wins mega $2.5B contract", impacts: [{ ticker: "TCS", change: 7 }] },
+  { headline: "Govt slaps import duty hike on EV components", impacts: [{ ticker: "TATAMOTORS", change: -5 }] },
+  { headline: "Crude oil crashes 12%", impacts: [{ ticker: "RELIANCE", change: -6 }, { ticker: "TATAMOTORS", change: 5 }] },
+  { headline: "US Fed signals rate cuts", impacts: [{ ticker: "HDFCBANK", change: 6 }, { ticker: "TCS", change: -5 }] },
+  { headline: "Nationwide truckers strike", impacts: [{ ticker: "ZOMATO", change: 4 }, { ticker: "TATAMOTORS", change: -4 }] },
+  { headline: "Record heatwave grips India", impacts: [{ ticker: "SUZLON", change: -5 }, { ticker: "ZOMATO", change: 6 }] },
+  { headline: "IT hiring freeze deepens", impacts: [{ ticker: "TCS", change: -6 }, { ticker: "HDFCBANK", change: 3 }] },
+  { headline: "Global auto giants announce steep price cuts", impacts: [{ ticker: "TATAMOTORS", change: -7 }] },
+  { headline: "RBI tightens unsecured lending norms", impacts: [{ ticker: "HDFCBANK", change: -6 }, { ticker: "ZOMATO", change: 3 }] },
+  { headline: "Renewable energy export incentive package", impacts: [{ ticker: "SUZLON", change: 9 }, { ticker: "RELIANCE", change: -4 }] },
+  { headline: "HDFC Bank reports high deposit growth", impacts: [{ ticker: "HDFCBANK", change: 6 }] },
+  { headline: "JLR announces major vehicle recall", impacts: [{ ticker: "TATAMOTORS", change: -7 }] },
+  { headline: "Zomato increases platform fee", impacts: [{ ticker: "ZOMATO", change: 5 }] },
+  { headline: "Suzlon secures largest wind turbine order", impacts: [{ ticker: "SUZLON", change: 9 }] },
+  { headline: "Reliance board approves separate listing", impacts: [{ ticker: "RELIANCE", change: 7 }] },
+  { headline: "Cyberattack disrupts TCS services", impacts: [{ ticker: "TCS", change: -6 }] },
+  { headline: "Govt proposes social-security for gig workers", impacts: [{ ticker: "ZOMATO", change: -7 }] },
+  { headline: "Fire at Reliance Jamnagar complex", impacts: [{ ticker: "RELIANCE", change: -6 }] },
+  { headline: "JLR reports record orders", impacts: [{ ticker: "TATAMOTORS", change: 6 }] },
+  { headline: "Govt introduces mandatory cybersecurity upgrades", impacts: [{ ticker: "TCS", change: 5 }, { ticker: "HDFCBANK", change: -2 }, { ticker: "RELIANCE", change: 3 }] }
+];
+
 // ─── Room State ─────────────────────────────────────────────────────────────
 const rooms = new Map();
 
@@ -69,6 +93,11 @@ function createRoomState(hostId, hostName, modeOrMinutes = '10') {
     phase: isMatch ? 'round1' : 'active', // match phases: round1, break1, round2, break2, round3, finished
     phaseTimer: isMatch ? 600 : durationSeconds,
     isMarketFrozen: false,
+    isPaused: false,
+    round1Jump5Done: false,
+    round1Jump10Done: false,
+    round2NewsIndex: 0,
+    round2NewsTimer: 0,
     tickInterval: null,
     newsInterval: null,
     gameStarted: false,
@@ -305,9 +334,78 @@ function startGame(roomCode, room) {
     } else if (room.mode === 'match') {
       room.phaseTimer--;
 
-      if (!room.isMarketFrozen) {
+      if (room.phase === 'round1' && !room.isMarketFrozen) {
+        // Round 1 discrete scheduled jumps:
+        // At Minute 5:00 (phaseTimer <= 300)
+        if (room.phaseTimer <= 300 && !room.round1Jump5Done) {
+          room.round1Jump5Done = true;
+          const jumps = { RELIANCE: 0.05, TCS: 0.06, TATAMOTORS: 0.08, SUZLON: 0.10 };
+          room.stocks.forEach(s => {
+            if (jumps[s.ticker]) {
+              s.price = Math.round(s.price * (1 + jumps[s.ticker]) * 100) / 100;
+              s.changePercent = ((s.price - s.basePrice) / s.basePrice) * 100;
+            }
+          });
+          broadcastPrices(roomCode, room);
+          broadcastPortfolios(roomCode, room);
+          console.log(`📈 Round 1 Jump at 5m executed for room ${roomCode}`);
+        }
+
+        // At Minute 10:00 (phaseTimer <= 0)
+        if (room.phaseTimer <= 0 && !room.round1Jump10Done) {
+          room.round1Jump10Done = true;
+          const jumps = { RELIANCE: 0.06, HDFCBANK: -0.02, ZOMATO: -0.07, TATAMOTORS: -0.06 };
+          room.stocks.forEach(s => {
+            if (jumps[s.ticker]) {
+              s.price = Math.round(s.price * (1 + jumps[s.ticker]) * 100) / 100;
+              s.changePercent = ((s.price - s.basePrice) / s.basePrice) * 100;
+            }
+          });
+          broadcastPrices(roomCode, room);
+          broadcastPortfolios(roomCode, room);
+          console.log(`📉 Round 1 Jump at 10m executed for room ${roomCode}`);
+        }
+      } else if (room.phase === 'round2' && !room.isMarketFrozen) {
+        // Round 2: News driven every 30s
+        room.round2NewsTimer++;
+        if (room.round2NewsTimer >= 30 && room.round2NewsIndex < ROUND2_NEWS_ITEMS.length) {
+          room.round2NewsTimer = 0;
+          const newsItem = ROUND2_NEWS_ITEMS[room.round2NewsIndex];
+          room.round2NewsIndex++;
+
+          // Broadcast headline immediately
+          io.to(roomCode).emit('newsFlash', { headline: newsItem.headline });
+
+          // Hidden 5-second delay: Apply exact price impact 5 seconds later
+          setTimeout(() => {
+            if (!rooms.has(roomCode)) return;
+            newsItem.impacts.forEach(imp => {
+              const stock = room.stocks.find(s => s.ticker === imp.ticker);
+              if (stock && !room.isMarketFrozen) {
+                stock.price = Math.round(stock.price * (1 + imp.change / 100) * 100) / 100;
+                stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+              }
+            });
+            broadcastPrices(roomCode, room);
+            broadcastPortfolios(roomCode, room);
+          }, 5000);
+        }
+      } else if (room.phase === 'round3' && !room.isMarketFrozen) {
+        // Round 3: Base market noise (±0.2% to ±0.5% per tick)
+        room.stocks.forEach(stock => {
+          const mag = 0.002 + Math.random() * 0.003;
+          const sign = Math.random() < 0.5 ? 1 : -1;
+          const delta = stock.price * mag * sign;
+          const newPrice = Math.round((stock.price + delta) * 100) / 100;
+          
+          const minP = stock.basePrice * 0.85;
+          const maxP = stock.basePrice * 1.15;
+          stock.price = Math.min(Math.max(newPrice, minP), maxP);
+          stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+        });
         broadcastPrices(roomCode, room);
       }
+
       broadcastLeaderboard(roomCode, room);
       broadcastPortfolios(roomCode, room);
 
@@ -325,16 +423,15 @@ function startGame(roomCode, room) {
     }
   }, 1000);
 
-  // News Interval
-  const newsDelay = room.mode === 'match' ? 10000 : 15000;
-  room.newsInterval = setInterval(() => {
-    if (room.isPaused) return;
-    if (room.mode === 'standard' && room.timer > 5) {
-      fireNewsEvent(roomCode, room);
-    } else if (room.mode === 'match' && !room.isMarketFrozen && room.phaseTimer > 5) {
-      fireNewsEvent(roomCode, room);
-    }
-  }, newsDelay);
+  // News Interval (Only for Standard mode)
+  if (room.mode === 'standard') {
+    room.newsInterval = setInterval(() => {
+      if (room.isPaused) return;
+      if (room.timer > 5) {
+        fireNewsEvent(roomCode, room);
+      }
+    }, 15000);
+  }
 }
 
 function advanceMatchPhase(roomCode, room) {
@@ -345,6 +442,8 @@ function advanceMatchPhase(roomCode, room) {
   } else if (room.phase === 'break1') {
     room.phase = 'round2';
     room.phaseTimer = 600; // Round 2: 10 mins
+    room.round2NewsIndex = 0;
+    room.round2NewsTimer = 0;
     room.isMarketFrozen = false;
   } else if (room.phase === 'round2') {
     room.phase = 'break2';
@@ -691,6 +790,20 @@ io.on('connection', (socket) => {
           message: `Sold/Short ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)}`,
         });
       }
+    }
+
+    // Active Player Trade Impact (Round 3 / Match Mode):
+    // BUY: +0.1% to +0.5% upward price pressure
+    // SELL: -0.1% to -0.5% downward price pressure
+    if (room.mode === 'match') {
+      const impactPct = 0.001 + Math.random() * 0.004;
+      if (action === 'BUY') {
+        stock.price = Math.round(stock.price * (1 + impactPct) * 100) / 100;
+      } else if (action === 'SELL') {
+        stock.price = Math.round(stock.price * (1 - impactPct) * 100) / 100;
+      }
+      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+      broadcastPrices(roomCode, room);
     }
 
     broadcastPortfolios(roomCode, room);
