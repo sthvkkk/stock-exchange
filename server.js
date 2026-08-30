@@ -792,10 +792,10 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Active Player Trade Impact (Round 3 / Match Mode):
+    // Active Player Trade Impact (STRICTLY Round 3 Only):
     // BUY: +0.1% to +0.5% upward price pressure
     // SELL: -0.1% to -0.5% downward price pressure
-    if (room.mode === 'match') {
+    if (room.mode === 'match' && room.phase === 'round3') {
       const impactPct = 0.001 + Math.random() * 0.004;
       if (action === 'BUY') {
         stock.price = Math.round(stock.price * (1 + impactPct) * 100) / 100;
