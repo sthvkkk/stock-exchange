@@ -447,7 +447,6 @@ function startGame(roomCode, room) {
 function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
   if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
 
-  let priceChanged = false;
   room.stocks.forEach(stock => {
     const baseR2Price = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
     if (!baseR2Price || baseR2Price <= 0) return;
@@ -508,20 +507,13 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     }
 
     const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
-    const newPrice = Math.max(calculatedPrice, 1);
-
-    if (stock.price !== newPrice) {
-      stock.price = newPrice;
-      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
-      priceChanged = true;
-    }
+    stock.price = Math.max(calculatedPrice, 1);
+    stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
   });
 
-  if (priceChanged) {
-    broadcastPrices(roomCode, room);
-    broadcastPortfolios(roomCode, room);
-    broadcastLeaderboard(roomCode, room);
-  }
+  broadcastPrices(roomCode, room);
+  broadcastPortfolios(roomCode, room);
+  broadcastLeaderboard(roomCode, room);
 }
 
 function advanceMatchPhase(roomCode, room) {
