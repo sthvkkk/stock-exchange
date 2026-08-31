@@ -461,11 +461,17 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
   if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
 
   room.stocks.forEach(stock => {
-    let baseR2Price = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
+    let baseR2Price = stock.crashedBasePrice || stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
     if (!baseR2Price || baseR2Price <= 0) return;
 
     if (typeof stock.r3BaselineNI !== 'number') {
       stock.r3BaselineNI = 0;
+    }
+    if (typeof stock.circuitBreakerTriggered === 'undefined') {
+      stock.circuitBreakerTriggered = false;
+    }
+    if (typeof stock.crashedBasePrice === 'undefined') {
+      stock.crashedBasePrice = null;
     }
 
     if (updateTickNoise || typeof stock.r3TickNoisePct !== 'number') {
@@ -502,20 +508,24 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
 
     if (totalPercentChange >= 10.0) {
       // Over-Surge Circuit Breaker Threshold (>= +10.0%): Permanently crash base reference by -30% (Stealth Execution)
-      stock.round2ClosePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
-      stock.round2ClosingPrice = stock.round2ClosePrice;
-      stock.r3BaselineNI = currentNI; // Lock baseline NI to crash moment
-      baseR2Price = stock.round2ClosePrice;
+      stock.circuitBreakerTriggered = 'CRASH';
+      stock.crashedBasePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
+      stock.round2ClosePrice = stock.crashedBasePrice;
+      stock.round2ClosingPrice = stock.crashedBasePrice;
+      stock.r3BaselineNI = currentNI; // Lock baseline NI to crash moment so demand delta resets to 0
+      baseR2Price = stock.crashedBasePrice;
       finalChangePct = noisePercent; // Price starts at new crashed base + tick noise
 
       console.log(`⚡ STICKY CRASH: ${stock.ticker} total surge = ${totalPercentChange.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
 
     } else if (totalPercentChange <= -10.0) {
       // Short Squeeze Threshold (<= -10.0%): Permanently jump base reference by +30% (Stealth Execution)
-      stock.round2ClosePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
-      stock.round2ClosingPrice = stock.round2ClosePrice;
-      stock.r3BaselineNI = currentNI; // Lock baseline NI to squeeze moment
-      baseR2Price = stock.round2ClosePrice;
+      stock.circuitBreakerTriggered = 'SQUEEZE';
+      stock.crashedBasePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
+      stock.round2ClosePrice = stock.crashedBasePrice;
+      stock.round2ClosingPrice = stock.crashedBasePrice;
+      stock.r3BaselineNI = currentNI; // Lock baseline NI to squeeze moment so demand delta resets to 0
+      baseR2Price = stock.crashedBasePrice;
       finalChangePct = noisePercent; // Price starts at new squeezed base + tick noise
 
       console.log(`🚀 STICKY SQUEEZE: ${stock.ticker} total drop = ${totalPercentChange.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
@@ -552,6 +562,8 @@ function advanceMatchPhase(roomCode, room) {
       s.round2ClosePrice = s.price;
       s.round2ClosingPrice = s.price;
       s.r3BaselineNI = 0;
+      s.circuitBreakerTriggered = false;
+      s.crashedBasePrice = null;
     });
   } else if (room.phase === 'break2') {
     room.phase = 'round3';
@@ -563,6 +575,8 @@ function advanceMatchPhase(roomCode, room) {
       if (!s.round2ClosePrice) s.round2ClosePrice = s.price;
       if (!s.round2ClosingPrice) s.round2ClosingPrice = s.price;
       if (typeof s.r3BaselineNI !== 'number') s.r3BaselineNI = 0;
+      if (typeof s.circuitBreakerTriggered === 'undefined') s.circuitBreakerTriggered = false;
+      if (typeof s.crashedBasePrice === 'undefined') s.crashedBasePrice = null;
     });
 
     // Initial recalculation for Round 3 start
