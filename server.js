@@ -627,7 +627,7 @@ io.on('connection', (socket) => {
   console.log(`🔌 Connected: ${socket.id}`);
 
   socket.on('room:syncTime', (data) => {
-    const targetRoomCode = (data && data.roomCode) || socket.roomCode;
+    const targetRoomCode = String((data && data.roomCode) || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return;
     
@@ -642,14 +642,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('room:getLobbyState', (data) => {
-    const targetRoomCode = (data && data.roomCode) || socket.roomCode;
+    const targetRoomCode = String((data && data.roomCode) || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room) return;
     socket.emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
   });
 
   socket.on('room:getLatestState', (data) => {
-    const targetRoomCode = (data && data.roomCode) || socket.roomCode;
+    const targetRoomCode = String((data && data.roomCode) || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return;
 
@@ -698,7 +698,8 @@ io.on('connection', (socket) => {
     rooms.set(roomCode, room);
 
     socket.join(roomCode);
-    socket.roomCode = roomCode;
+    socket.roomCode = String(roomCode).trim();
+    socket.isHost = true;
 
     socket.emit('roomCreated', {
       roomCode,
@@ -719,7 +720,8 @@ io.on('connection', (socket) => {
 
     if (verifyHost(socket, room, hostToken)) {
       socket.join(roomCode);
-      socket.roomCode = roomCode;
+      socket.roomCode = String(roomCode).trim();
+      socket.isHost = true;
       socket.hostToken = hostToken;
 
       const isMaster = room.mode === 'match';
@@ -759,7 +761,8 @@ io.on('connection', (socket) => {
 
     addPlayer(room, socket.id, playerName);
     socket.join(roomCode);
-    socket.roomCode = roomCode;
+    socket.roomCode = String(roomCode).trim();
+    socket.isHost = false;
 
     socket.emit('roomJoined', {
       roomCode,
@@ -785,7 +788,7 @@ io.on('connection', (socket) => {
 
   // Master Control Suite Handlers
   const handleTogglePause = ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return socket.emit('error', { message: 'Room or game not active.' });
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can pause/resume.' });
@@ -805,7 +808,7 @@ io.on('connection', (socket) => {
   socket.on('master:pauseRound', handleTogglePause);
 
   socket.on('master:skipToBreak', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can skip round.' });
@@ -838,7 +841,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('master:endBreak', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can end break.' });
@@ -850,7 +853,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('master:extendBreak', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can extend break.' });
@@ -874,7 +877,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('master:extendRound', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can extend the round.' });
@@ -906,7 +909,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('master:decreaseRound', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can decrease round time.' });
@@ -956,7 +959,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('master:skipRound', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can skip/end the round.' });
@@ -983,7 +986,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('master:endRound', ({ roomCode, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) return;
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can end match.' });
@@ -995,7 +998,7 @@ io.on('connection', (socket) => {
 
   // Master Price Manipulation (During Breaks OR Paused in Match Mode)
   const handleMasterPriceUpdate = ({ roomCode, ticker, newPrice, hostToken }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room) {
       return socket.emit('error', { message: 'Room not found.' });
@@ -1038,7 +1041,7 @@ io.on('connection', (socket) => {
 
   // Trade Execution (Separate LONG and SHORT tracking per ticker)
   const handleExecuteTrade = ({ roomCode, ticker, action, type, quantity }) => {
-    const targetRoomCode = roomCode || socket.roomCode;
+    const targetRoomCode = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) {
       socket.emit('tradeResult', { success: false, message: 'Game not active.' });

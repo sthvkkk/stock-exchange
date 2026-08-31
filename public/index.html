@@ -701,9 +701,7 @@
             const newPrice = parseFloat(input.value);
             if(isNaN(newPrice) || newPrice <= 0) return showToast('Enter valid price');
             if (socket && code) {
-                socket.emit('master:updatePrice', { roomCode: code, ticker, newPrice, hostToken });
-                socket.emit('masterUpdatePrice', { roomCode: code, ticker, newPrice, hostToken });
-                socket.emit('master:setPrice', { roomCode: code, ticker, newPrice, hostToken });
+                socket.emit('master:updatePrice', { roomCode: String(code).trim(), ticker, newPrice, hostToken });
             }
             const currentDisplay = document.getElementById(`masterCurrentPrice-${ticker}`);
             if(currentDisplay) currentDisplay.textContent = formatMoney(newPrice);
@@ -714,41 +712,39 @@
         window.masterTogglePause = () => {
             const code = getActiveRoomCode();
             if(socket && code) {
-                socket.emit('master:togglePause', { roomCode: code, hostToken });
-                socket.emit('master:resumeRound', { roomCode: code, hostToken });
-                socket.emit('master:pauseRound', { roomCode: code, hostToken });
+                socket.emit('master:togglePause', { roomCode: String(code).trim(), hostToken });
             }
         };
         window.masterExtendRound = () => {
             const code = getActiveRoomCode();
-            if(socket && code) socket.emit('master:extendRound', { roomCode: code, hostToken });
+            if(socket && code) socket.emit('master:extendRound', { roomCode: String(code).trim(), hostToken });
         };
         window.masterDecreaseRound = () => {
             const code = getActiveRoomCode();
-            if(socket && code) socket.emit('master:decreaseRound', { roomCode: code, hostToken });
+            if(socket && code) socket.emit('master:decreaseRound', { roomCode: String(code).trim(), hostToken });
         };
         window.masterSkipRound = () => {
             const code = getActiveRoomCode();
             if(confirm('Are you sure you want to skip / end the current active round immediately?')) {
-                if(socket && code) socket.emit('master:skipRound', { roomCode: code, hostToken });
+                if(socket && code) socket.emit('master:skipRound', { roomCode: String(code).trim(), hostToken });
             }
         };
         window.masterSkipToBreak = () => {
             const code = getActiveRoomCode();
-            if(socket && code) socket.emit('master:skipToBreak', { roomCode: code, hostToken });
+            if(socket && code) socket.emit('master:skipToBreak', { roomCode: String(code).trim(), hostToken });
         };
         window.masterEndBreak = () => {
             const code = getActiveRoomCode();
-            if(socket && code) socket.emit('master:endBreak', { roomCode: code, hostToken });
+            if(socket && code) socket.emit('master:endBreak', { roomCode: String(code).trim(), hostToken });
         };
         window.masterExtendBreak = () => {
             const code = getActiveRoomCode();
-            if(socket && code) socket.emit('master:extendBreak', { roomCode: code, hostToken });
+            if(socket && code) socket.emit('master:extendBreak', { roomCode: String(code).trim(), hostToken });
         };
         window.masterEndRound = () => {
             const code = getActiveRoomCode();
             if(confirm('Are you sure you want to end the match now and force jump to final standings?')) {
-                if(socket && code) socket.emit('master:endRound', { roomCode: code, hostToken });
+                if(socket && code) socket.emit('master:endRound', { roomCode: String(code).trim(), hostToken });
             }
         };
 
