@@ -469,8 +469,8 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     }
 
     if (updateTickNoise || typeof stock.r3TickNoisePct !== 'number') {
-      // Small random organic tick fluctuation between -1.5% and +1.5% per 1-second tick
-      stock.r3TickNoisePct = Math.round((Math.random() * 3.0 - 1.5) * 100) / 100;
+      // Continuous random noise factor between -0.95% and +0.95% per 1-second tick
+      stock.r3TickNoisePct = Math.round(((Math.random() * 1.90) - 0.95) * 100) / 100;
     }
 
     // Calculate total Net Investment (NI) across all active player orders in Round 3
@@ -492,7 +492,7 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     const uncappedDemandPercent = (deltaNI / 1000000) * 2;
     const noisePercent = stock.r3TickNoisePct || 0;
 
-    // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise %
+    // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise % (-0.95% to +0.95%)
     const rawTotalPercentChange = uncappedDemandPercent + noisePercent;
 
     // Enforce Strict 2-Decimal Precision Check
@@ -508,7 +508,7 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       baseR2Price = stock.round2ClosePrice;
       finalChangePct = noisePercent; // Price starts at new crashed base + tick noise
 
-      console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalPercentChange.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
+      console.log(`⚡ STICKY CRASH: ${stock.ticker} total surge = ${totalPercentChange.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
 
     } else if (totalPercentChange <= -10.0) {
       // Short Squeeze Threshold (<= -10.0%): Permanently jump base reference by +30% (Stealth Execution)
@@ -518,7 +518,7 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       baseR2Price = stock.round2ClosePrice;
       finalChangePct = noisePercent; // Price starts at new squeezed base + tick noise
 
-      console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalPercentChange.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
+      console.log(`🚀 STICKY SQUEEZE: ${stock.ticker} total drop = ${totalPercentChange.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
     }
 
     const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
