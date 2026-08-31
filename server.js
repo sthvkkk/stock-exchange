@@ -694,6 +694,7 @@ io.on('connection', (socket) => {
       mode: room.mode,
       isMaster: room.mode === 'match' && socket.id === room.hostId,
       hostToken,
+      roundEndTime: room.roundEndTime || (Date.now() + 10 * 60 * 1000)
       durationMinutes: room.durationMinutes,
     });
     io.to(roomCode).emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
@@ -756,6 +757,7 @@ io.on('connection', (socket) => {
       roomCode,
       mode: room.mode,
       isMaster: room.mode === 'match' && verifyHost(socket, room),
+      roundEndTime: room.roundEndTime || (Date.now() + 10 * 60 * 1000)
     });
     io.to(roomCode).emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
     console.log(`👤 ${playerName} joined ${roomCode}`);

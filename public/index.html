@@ -873,6 +873,7 @@
                 isHost = true;
                 isMaster = data.isMaster;
                 gameMode = data.mode;
+                if (data.roundEndTime) window.targetRoundEndTime = data.roundEndTime;
                 hostToken = data.hostToken || null;
                 if (hostToken) {
                     sessionStorage.setItem('mockstock_master_session', JSON.stringify({
@@ -918,6 +919,7 @@
                 isHost = false;
                 isMaster = data.isMaster;
                 gameMode = data.mode;
+                if (data.roundEndTime) window.targetRoundEndTime = data.roundEndTime;
                 document.getElementById('displayRoomCode').textContent = roomCode;
                 document.getElementById('waitingModeBadge').textContent = gameMode === 'match' ? 'Match Mode (40m Tournament)' : 'Standard Mode';
                 document.getElementById('btnStartGame').classList.add('hidden');
@@ -1062,7 +1064,14 @@
             if (window.localClockInterval) clearInterval(window.localClockInterval);
             
             function updateClockDisplay() {
-                if (!window.targetRoundEndTime) return;
+                const timerEl = document.getElementById('timerDisplay') || document.querySelector('.timer-text');
+                const masterTimerEl = document.getElementById('masterTimerDisplay');
+
+                if (!window.targetRoundEndTime) {
+                    if (timerEl) timerEl.innerText = "10:00";
+                    if (masterTimerEl) masterTimerEl.innerText = "10:00";
+                    return;
+                }
                 
                 let remainingMs;
                 if (isPaused) {
