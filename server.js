@@ -396,7 +396,7 @@ function startGame(roomCode, room) {
           // Broadcast headline immediately
           io.to(roomCode).emit('newsFlash', { headline: newsItem.headline });
 
-          // Hidden 5-second delay: Apply exact price impact 5 seconds later
+          // Hidden 10-second delay: Apply exact price impact 10 seconds later
           setTimeout(() => {
             if (!rooms.has(roomCode)) return;
             newsItem.impacts.forEach(imp => {
@@ -408,7 +408,7 @@ function startGame(roomCode, room) {
             });
             broadcastPrices(roomCode, room);
             broadcastPortfolios(roomCode, room);
-          }, 5000);
+          }, 10000);
         }
       } else if (room.phase === 'round3' && !room.isMarketFrozen) {
         // Round 3: Anti-Cartel Circuit Breaker monitoring (+15% surge -> 30% flash crash)
