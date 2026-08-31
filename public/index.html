@@ -599,11 +599,12 @@
                 }
 
                 card.setAttribute('data-ticker', stock.ticker);
+                card.setAttribute('onclick', `window.openTradeModal('${stock.ticker}')`);
 
-                card.onclick = () => {
+                card.onclick = (e) => {
                     if(isMaster) return;
                     if(isMarketFrozen) return showToast('Market is frozen during breaks!');
-                    openTradeModal(stock.ticker);
+                    window.openTradeModal(stock.ticker);
                 };
 
                 const isPositive = stock.changePercent > 0;
@@ -623,8 +624,8 @@
                         </div>
                     </div>
                     <div class="mt-2 pt-2.5 border-t border-slate-800/80 flex justify-between items-center text-xs">
-                        <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">POSITION</span>
-                        <span class="text-sm font-bold ${owned < 0 ? 'text-rose-400' : 'text-slate-200'}">${owned} shares ${owned < 0 ? '(SHORT)' : ''}</span>
+                        <span class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">POSITION: <span class="text-sm font-bold ${owned < 0 ? 'text-rose-400' : 'text-slate-200'}">${owned} shares ${owned < 0 ? '(SHORT)' : ''}</span></span>
+                        <button onclick="event.stopPropagation(); window.openTradeModal('${stock.ticker}')" class="bg-blue-600/90 hover:bg-blue-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm">Trade</button>
                     </div>
                 `;
             });
@@ -846,16 +847,24 @@
         function openTradeModal(ticker) {
             if(isMaster) return;
             if(isMarketFrozen) return showToast('Market is frozen during breaks!');
+            if(!ticker) return;
+
             selectedTickerForTrade = ticker;
-            tradeQtyInput.value = 1;
-            document.getElementById('modalTicker').textContent = ticker;
-            document.getElementById('modalError').classList.add('hidden');
+            if (tradeQtyInput) tradeQtyInput.value = 1;
+            
+            const modalTicker = document.getElementById('modalTicker');
+            if (modalTicker) modalTicker.textContent = ticker;
+            
+            const modalError = document.getElementById('modalError');
+            if (modalError) modalError.classList.add('hidden');
+            
             updateTradeModalVals();
+
             const modal = document.getElementById('tradeModal');
             if (modal) {
                 modal.classList.remove('hidden');
                 modal.style.display = 'flex';
-                modal.style.zIndex = '9999';
+                modal.style.zIndex = '99999';
             }
         }
         window.openTradeModal = openTradeModal;
