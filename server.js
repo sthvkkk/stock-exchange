@@ -411,8 +411,8 @@ function startGame(roomCode, room) {
           }, 10000);
         }
       } else if (room.phase === 'round3' && !room.isMarketFrozen) {
-        // Round 3: Real-time recalculation of Net Investment (NI) demand-driven prices & threshold rules
-        recalculateRound3Prices(roomCode, room);
+        // Round 3: 1-second continuous tick organic noise (-1.5% to +1.5%) combined with NI demand engine
+        recalculateRound3Prices(roomCode, room, true);
       }
 
       broadcastLeaderboard(roomCode, room);
@@ -444,13 +444,18 @@ function startGame(roomCode, room) {
 }
 
 // ─── Round 3 Algorithmic Demand Price Engine & Correction Thresholds ──────────
-function recalculateRound3Prices(roomCode, room) {
+function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
   if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
 
   let priceChanged = false;
   room.stocks.forEach(stock => {
     const baseR2Price = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
     if (!baseR2Price || baseR2Price <= 0) return;
+
+    if (updateTickNoise || typeof stock.r3TickNoisePct !== 'number') {
+      // Small random organic tick fluctuation between -1.5% and +1.5% per 1-second tick
+      stock.r3TickNoisePct = Math.round((Math.random() * 3.0 - 1.5) * 100) / 100;
+    }
 
     // Calculate total Net Investment (NI) across all active player orders in Round 3
     let totalLongQty = 0;
@@ -465,30 +470,33 @@ function recalculateRound3Prices(roomCode, room) {
     });
 
     const netInvestment = (totalLongQty - totalShortQty) * baseR2Price;
-    // Uncapped % Change = (NI / 1,000,000) * 2%  (1% shift per ₹5,00,000 NI)
-    const uncappedChangePct = (netInvestment / 1000000) * 2;
+    // NI Demand % Change = (NI / 1,000,000) * 2%  (1% shift per ₹5,00,000 NI)
+    const niChangePct = (netInvestment / 1000000) * 2;
 
-    let finalChangePct = uncappedChangePct;
+    // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise %
+    const totalUncappedPct = niChangePct + (stock.r3TickNoisePct || 0);
 
-    if (uncappedChangePct >= 10.0) {
+    let finalChangePct = totalUncappedPct;
+
+    if (totalUncappedPct >= 10.0) {
       // Over-Surge Threshold (>= +10%): Crash to EXACTLY -30%
       finalChangePct = -30.0;
       if (!stock.circuitBreakerTriggered) {
         stock.circuitBreakerTriggered = true;
         stock.shortSqueezeTriggered = false;
-        console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} NI = ₹${netInvestment} (>= +10%) -> Crashed -30%!`);
+        console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalUncappedPct.toFixed(2)}% (>= +10%) -> Crashed -30%!`);
         io.to(roomCode).emit('newsFlash', {
           ticker: stock.ticker,
           headline: `CIRCUIT BREAKER TRIGGERED: ${stock.ticker} buying surge exceeded +10% threshold! Market crashed -30%!`,
         });
       }
-    } else if (uncappedChangePct <= -10.0) {
+    } else if (totalUncappedPct <= -10.0) {
       // Short Squeeze Threshold (<= -10%): Rally to EXACTLY +30%
       finalChangePct = 30.0;
       if (!stock.shortSqueezeTriggered) {
         stock.shortSqueezeTriggered = true;
         stock.circuitBreakerTriggered = false;
-        console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} NI = ₹${netInvestment} (<= -10%) -> Squeezed +30%!`);
+        console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalUncappedPct.toFixed(2)}% (<= -10%) -> Squeezed +30%!`);
         io.to(roomCode).emit('newsFlash', {
           ticker: stock.ticker,
           headline: `SHORT SQUEEZE TRIGGERED: ${stock.ticker} short selling exceeded -10% threshold! Squeeze rally jumped +30%!`,
