@@ -788,16 +788,17 @@
                 const banner = document.getElementById('newsBanner');
                 const text = document.getElementById('newsText');
                 
-                banner.className = `overflow-hidden transition-all duration-500 ease-in-out w-full font-medium text-xs sm:text-sm tracking-wide flex items-center bg-slate-950 border-t border-slate-800/60 text-slate-200 h-10 opacity-100`;
+                const isCircuitBreaker = data.headline && data.headline.includes('CIRCUIT BREAKER');
+                banner.className = `overflow-hidden transition-all duration-500 ease-in-out w-full font-bold text-xs sm:text-sm tracking-wide flex items-center ${isCircuitBreaker ? 'bg-rose-950 border-t border-rose-600 text-rose-200 animate-pulse' : 'bg-slate-950 border-t border-slate-800/60 text-slate-200'} h-10 opacity-100`;
                 
                 text.classList.remove('animate-marquee');
                 text.classList.add('opacity-0');
                 
-                const tickerPrefix = data.ticker ? `${data.ticker} — ` : '';
+                const tickerPrefix = (data.ticker && !isCircuitBreaker) ? `${data.ticker} — ` : '';
                 const delayText = data.delaySeconds ? ` [Price impact in ${data.delaySeconds}s]` : '';
                 
                 setTimeout(() => {
-                    text.textContent = `BREAKING: ${tickerPrefix}${data.headline}${delayText}`;
+                    text.textContent = isCircuitBreaker ? data.headline : `BREAKING: ${tickerPrefix}${data.headline}${delayText}`;
                     text.classList.remove('opacity-0');
                     void text.offsetWidth;
                     text.classList.add('animate-marquee');

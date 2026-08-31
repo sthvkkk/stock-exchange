@@ -410,33 +410,8 @@ function startGame(roomCode, room) {
           }, 5000);
         }
       } else if (room.phase === 'round3' && !room.isMarketFrozen) {
-        // Round 3: Secret demand/supply price engine with 4-second smooth transition & zero-volume background drift (1.0% to 1.9%)
-        room.stocks.forEach(stock => {
-          if (typeof stock.targetPrice !== 'number') {
-            stock.targetPrice = stock.price;
-          }
-
-          if (stock.transitionStepsRemaining && stock.transitionStepsRemaining > 0) {
-            // Smoothly interpolate stock price toward targetPrice over 4 seconds
-            const gap = stock.targetPrice - stock.price;
-            stock.price = Math.round((stock.price + (gap / stock.transitionStepsRemaining)) * 100) / 100;
-            stock.transitionStepsRemaining--;
-            if (stock.transitionStepsRemaining <= 0) {
-              stock.price = Math.round(stock.targetPrice * 100) / 100;
-            }
-          } else if (!stock.hasTradeInCycle) {
-            // Zero-volume organic market drift between 1.0% and 1.9%
-            const mag = 0.010 + Math.random() * 0.009;
-            const sign = Math.random() < 0.5 ? 1 : -1;
-            const delta = stock.price * mag * sign;
-            stock.price = Math.round((stock.price + delta) * 100) / 100;
-            stock.targetPrice = stock.price;
-          }
-
-          stock.hasTradeInCycle = false;
-          stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
-        });
-        broadcastPrices(roomCode, room);
+        // Round 3: Anti-Cartel Circuit Breaker monitoring (+15% surge -> 30% flash crash)
+        checkCircuitBreakers(roomCode, room);
       }
 
       broadcastLeaderboard(roomCode, room);
@@ -467,6 +442,44 @@ function startGame(roomCode, room) {
   }
 }
 
+// ─── Anti-Cartel Circuit Breaker Engine (Round 3) ──────────────────────────
+function checkCircuitBreakers(roomCode, room) {
+  if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
+
+  let triggered = false;
+  room.stocks.forEach(stock => {
+    const baseR2Price = stock.round2ClosingPrice || stock.basePrice;
+    if (!baseR2Price || baseR2Price <= 0) return;
+
+    const gainRatio = (stock.price - baseR2Price) / baseR2Price;
+
+    // Threshold Condition: Surged +15% or more compared to Round 2 close
+    if (gainRatio >= 0.15) {
+      const surgePrice = stock.price;
+      // Circuit Breaker Execution: Immediate 30% crash
+      const newPrice = Math.round((surgePrice * 0.70) * 100) / 100;
+      stock.price = newPrice;
+      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+      stock.round2ClosingPrice = stock.price; // Update baseline to post-crash level
+      triggered = true;
+
+      console.log(`⚡ CIRCUIT BREAKER TRIGGERED: ${stock.ticker} surged over 15% (₹${surgePrice}) and suffered 30% flash crash to ₹${stock.price}`);
+
+      // Global Socket.IO alert banner
+      io.to(roomCode).emit('newsFlash', {
+        ticker: stock.ticker,
+        headline: `CIRCUIT BREAKER TRIGGERED: ${stock.ticker} surged over 15% from Round 2 close and suffered a 30% flash crash!`,
+      });
+    }
+  });
+
+  if (triggered) {
+    broadcastPrices(roomCode, room);
+    broadcastPortfolios(roomCode, room);
+    broadcastLeaderboard(roomCode, room);
+  }
+}
+
 function advanceMatchPhase(roomCode, room) {
   if (room.phase === 'round1') {
     room.phase = 'break1';
@@ -482,17 +495,22 @@ function advanceMatchPhase(roomCode, room) {
     room.phase = 'break2';
     room.phaseTimer = 300; // Break 2: 5 mins
     room.isMarketFrozen = true;
+
+    // Capture and store each stock's final Round 2 closing price
+    room.stocks.forEach(s => {
+      s.round2ClosingPrice = s.price;
+    });
   } else if (room.phase === 'break2') {
     room.phase = 'round3';
     room.phaseTimer = 600; // Round 3: 10 mins
     room.isMarketFrozen = false;
 
-    // Store each stock's starting Round 3 change percentage for the halving decay
+    // Ensure round2ClosingPrice is stored for all stocks
     room.stocks.forEach(s => {
-      s.r3StartChangePercent = s.changePercent;
+      if (!s.round2ClosingPrice) s.round2ClosingPrice = s.price;
     });
 
-    // Clear and hide news banner for Round 3
+    // Clear and hide news banner for Round 3 start
     io.to(roomCode).emit('clearNewsBanner');
   } else if (room.phase === 'round3') {
     room.phase = 'finished';
@@ -699,6 +717,7 @@ io.on('connection', (socket) => {
       broadcastPrices(roomCode, room);
       broadcastPortfolios(roomCode, room);
       broadcastLeaderboard(roomCode, room);
+      checkCircuitBreakers(roomCode, room);
       console.log(`🛠️ Master updated ${ticker} price to ₹${stock.price}`);
     }
   };
@@ -811,24 +830,6 @@ io.on('connection', (socket) => {
           message: `Shorted ${qty} shares of ${ticker} at ₹${stock.price.toFixed(2)} (SHORT)`,
         });
       }
-    }
-
-    // Round 3 Demand/Supply Order Flow Impact (Secret Engine):
-    // Buying (LONG): Every ₹5,00,000 invested increases target price by +1.5%.
-    // Shorting (SHORT): Every ₹5,00,000 shorted decreases target price by -1.5%.
-    // Transition target price smoothly over 4 seconds.
-    if (room.mode === 'match' && room.phase === 'round3') {
-      const transactionValue = stock.price * qty;
-      const pctChange = (transactionValue / 500000) * 0.015; // 1.5% per 5 Lakhs
-      const sign = action === 'BUY' ? 1 : -1;
-      const priceDelta = stock.price * pctChange * sign;
-
-      if (typeof stock.targetPrice !== 'number') {
-        stock.targetPrice = stock.price;
-      }
-      stock.targetPrice += priceDelta;
-      stock.hasTradeInCycle = true;
-      stock.transitionStepsRemaining = 4; // Smooth 4-second transition
     }
 
     broadcastPortfolios(roomCode, room);
