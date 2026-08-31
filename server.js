@@ -414,7 +414,7 @@ function startGame(roomCode, room) {
           // Broadcast headline immediately
           io.to(roomCode).emit('newsFlash', { headline: newsItem.headline });
 
-          // Hidden 10-second delay: Apply exact price impact 10 seconds later
+          // Hidden 15-second delay: Apply exact price impact 15 seconds later
           setTimeout(() => {
             if (!rooms.has(roomCode)) return;
             newsItem.impacts.forEach(imp => {
@@ -426,7 +426,7 @@ function startGame(roomCode, room) {
             });
             broadcastPrices(roomCode, room);
             broadcastPortfolios(roomCode, room);
-          }, 10000);
+          }, 15000);
         }
       } else if (room.phase === 'round3' && !room.isMarketFrozen) {
         // Round 3: 1-second continuous tick organic noise (-1.5% to +1.5%) combined with NI demand engine
@@ -861,15 +861,18 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Can only extend break during a break phase!' });
     }
 
-    room.phaseTimer += 300; // Add +5 minutes
     room.endTime += (300 * 1000);
+    const remainingSeconds = Math.max(0, Math.floor((room.endTime - Date.now()) / 1000));
+    room.phaseTimer = remainingSeconds;
+
     io.to(roomCodeStr).emit('timerUpdate', {
-      remaining: room.phaseTimer,
+      remaining: remainingSeconds,
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
       endTime: room.endTime
     });
+    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.endTime });
     io.to(roomCodeStr).emit('matchStateUpdated', {
       message: 'Break extended by +5 minutes by Master!',
     });
@@ -887,21 +890,23 @@ io.on('connection', (socket) => {
       return socket.emit('masterActionResult', { success: false, message: 'No active round to extend.' });
     }
 
-    if (room.mode === 'match') {
-      room.phaseTimer += 300;
-    } else {
-      room.timer += 300;
-    }
     room.endTime += (300 * 1000);
+    const remainingSeconds = Math.max(0, Math.floor((room.endTime - Date.now()) / 1000));
 
-    const remaining = room.mode === 'match' ? room.phaseTimer : room.timer;
+    if (room.mode === 'match') {
+      room.phaseTimer = remainingSeconds;
+    } else {
+      room.timer = remainingSeconds;
+    }
+
     io.to(roomCodeStr).emit('timerUpdate', {
-      remaining,
+      remaining: remainingSeconds,
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
       endTime: room.endTime
     });
+    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.endTime });
 
     socket.emit('masterActionResult', { success: true, message: 'Round extended by 5 minutes' });
     io.to(roomCodeStr).emit('matchStateUpdated', { message: 'Round extended by +5 minutes by Master!' });
@@ -919,9 +924,11 @@ io.on('connection', (socket) => {
       return socket.emit('masterActionResult', { success: false, message: 'No active round to decrease.' });
     }
 
+    room.endTime -= (60 * 1000);
+    const remainingSeconds = Math.max(0, Math.floor((room.endTime - Date.now()) / 1000));
+
     if (room.mode === 'match') {
-      room.phaseTimer -= 60; // Subtract 60 seconds
-      room.endTime -= (60 * 1000);
+      room.phaseTimer = remainingSeconds;
       if (room.phaseTimer <= 0) {
         room.phaseTimer = 0;
         advanceMatchPhase(roomCodeStr, room);
@@ -932,8 +939,7 @@ io.on('connection', (socket) => {
         return;
       }
     } else {
-      room.timer -= 60;
-      room.endTime -= (60 * 1000);
+      room.timer = remainingSeconds;
       if (room.timer <= 0) {
         room.timer = 0;
         endGame(roomCodeStr, room);
@@ -945,13 +951,14 @@ io.on('connection', (socket) => {
       }
     }
 
-    const remaining = room.mode === 'match' ? room.phaseTimer : room.timer;
     io.to(roomCodeStr).emit('timerUpdate', {
-      remaining,
+      remaining: remainingSeconds,
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
+      endTime: room.endTime
     });
+    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.endTime });
 
     socket.emit('masterActionResult', { success: true, message: 'Round reduced by 1 minute' });
     io.to(roomCodeStr).emit('matchStateUpdated', { message: 'Round reduced by -1 minute by Master!' });

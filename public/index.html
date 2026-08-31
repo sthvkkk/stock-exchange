@@ -1079,7 +1079,7 @@
                 if (roomCode && socket && socket.connected) {
                     socket.emit('room:syncTime', { roomCode });
                     if (window.currentEndTime && !isPaused) {
-                        const remaining = Math.max(0, Math.ceil((window.currentEndTime - Date.now()) / 1000));
+                        const remaining = Math.max(0, Math.floor((window.currentEndTime - Date.now()) / 1000));
                         updateTimerUI(remaining);
                     }
                 }
@@ -1151,6 +1151,14 @@
                 }
 
                 updateTimerUI(data.remaining);
+            });
+
+            socket.on('timer:update', (data) => {
+                if(data.roundEndTime) {
+                    window.currentEndTime = data.roundEndTime;
+                    const remaining = Math.max(0, Math.floor((window.currentEndTime - Date.now()) / 1000));
+                    updateTimerUI(remaining);
+                }
             });
 
             socket.on('matchStateUpdated', (data) => {
