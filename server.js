@@ -686,6 +686,61 @@ io.on('connection', (socket) => {
     console.log(`⌛ Room ${roomCode} break extended +300s`);
   });
 
+  socket.on('master:extendRound', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted) return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can extend the round.' });
+
+    const isRoundActive = (room.mode === 'match' && room.phase.startsWith('round') && !room.isMarketFrozen) || (room.mode === 'standard' && room.timer > 0);
+    if (!isRoundActive) {
+      return socket.emit('masterActionResult', { success: false, message: 'No active round to extend.' });
+    }
+
+    if (room.mode === 'match') {
+      room.phaseTimer += 300;
+    } else {
+      room.timer += 300;
+    }
+
+    const remaining = room.mode === 'match' ? room.phaseTimer : room.timer;
+    io.to(roomCode).emit('timerUpdate', {
+      remaining,
+      phase: room.phase,
+      isMarketFrozen: room.isMarketFrozen,
+      isPaused: room.isPaused,
+    });
+
+    socket.emit('masterActionResult', { success: true, message: 'Round extended by 5 minutes' });
+    io.to(roomCode).emit('matchStateUpdated', { message: 'Round extended by +5 minutes by Master!' });
+    console.log(`⌛ Room ${roomCode} round extended +300s by Master`);
+  });
+
+  socket.on('master:skipRound', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted) return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can skip/end the round.' });
+
+    const isRoundActive = (room.mode === 'match' && room.phase.startsWith('round') && !room.isMarketFrozen) || (room.mode === 'standard' && room.timer > 0);
+    if (!isRoundActive) {
+      return socket.emit('masterActionResult', { success: false, message: 'No active round to skip/end.' });
+    }
+
+    if (room.mode === 'match') {
+      room.phaseTimer = 0;
+      advanceMatchPhase(roomCode, room);
+    } else {
+      room.timer = 0;
+      endGame(roomCode, room);
+    }
+
+    broadcastPrices(roomCode, room);
+    broadcastPortfolios(roomCode, room);
+    broadcastLeaderboard(roomCode, room);
+
+    socket.emit('masterActionResult', { success: true, message: 'Round successfully ended' });
+    console.log(`⏩ Room ${roomCode} round skipped/ended by Master`);
+  });
+
   socket.on('master:endRound', ({ roomCode }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;

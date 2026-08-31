@@ -249,6 +249,12 @@
                 <button id="btnMasterPause" onclick="masterTogglePause()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span id="masterPauseLabel">Pause Round</span>
                 </button>
+                <button id="btnMasterExtendRound" onclick="masterExtendRound()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
+                    <span>Extend Round (+5 Mins)</span>
+                </button>
+                <button id="btnMasterSkipRound" onclick="masterSkipRound()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
+                    <span>Skip / End Round</span>
+                </button>
                 <button id="btnMasterSkipBreak" onclick="masterSkipToBreak()" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span>Skip Round to Next Break</span>
                 </button>
@@ -604,6 +610,14 @@
         window.masterTogglePause = () => {
             if(socket && roomCode) socket.emit('master:togglePause', { roomCode });
         };
+        window.masterExtendRound = () => {
+            if(socket && roomCode) socket.emit('master:extendRound', { roomCode });
+        };
+        window.masterSkipRound = () => {
+            if(confirm('Are you sure you want to skip / end the current active round immediately?')) {
+                if(socket && roomCode) socket.emit('master:skipRound', { roomCode });
+            }
+        };
         window.masterSkipToBreak = () => {
             if(socket && roomCode) socket.emit('master:skipToBreak', { roomCode });
         };
@@ -858,11 +872,29 @@
                 }
             });
 
+            socket.on('masterActionResult', (data) => {
+                if(data.message) showToast(data.message, data.success ? 'success' : 'error');
+            });
+
             socket.on('timerUpdate', (data) => {
                 isMarketFrozen = data.isMarketFrozen || false;
                 isPaused = data.isPaused || false;
                 const m = Math.floor(data.remaining / 60).toString().padStart(2, '0');
                 const s = (data.remaining % 60).toString().padStart(2, '0');
+
+                const isRoundActive = (data.phase && data.phase.startsWith('round') && !isMarketFrozen && data.phase !== 'finished') || (data.phase === 'standard' && !isMarketFrozen && data.remaining > 0);
+                const btnExtendRound = document.getElementById('btnMasterExtendRound');
+                const btnSkipRound = document.getElementById('btnMasterSkipRound');
+                if (btnExtendRound) {
+                    btnExtendRound.disabled = !isRoundActive;
+                    btnExtendRound.style.opacity = isRoundActive ? '1' : '0.4';
+                    btnExtendRound.style.pointerEvents = isRoundActive ? 'auto' : 'none';
+                }
+                if (btnSkipRound) {
+                    btnSkipRound.disabled = !isRoundActive;
+                    btnSkipRound.style.opacity = isRoundActive ? '1' : '0.4';
+                    btnSkipRound.style.pointerEvents = isRoundActive ? 'auto' : 'none';
+                }
 
                 if(isMaster) {
                     document.getElementById('masterTimerDisplay').textContent = `${m}:${s}`;
