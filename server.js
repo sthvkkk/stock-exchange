@@ -467,28 +467,20 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
   if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
 
   room.stocks.forEach(stock => {
-    let baseR2Price = stock.crashedBasePrice || stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
-    if (!baseR2Price || baseR2Price <= 0) return;
+    let basePrice = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
+    if (!basePrice || basePrice <= 0) return;
 
-    if (typeof stock.r3BaselineNI !== 'number') {
-      stock.r3BaselineNI = 0;
-    }
-    if (typeof stock.circuitBreakerTriggered === 'undefined') {
-      stock.circuitBreakerTriggered = false;
-    }
-    if (typeof stock.crashedBasePrice === 'undefined') {
-      stock.crashedBasePrice = null;
-    }
+    if (typeof stock.r3BaselineNI !== 'number') stock.r3BaselineNI = 0;
+    if (typeof stock.isCrashed === 'undefined') stock.isCrashed = false;
+    if (typeof stock.isSqueezed === 'undefined') stock.isSqueezed = false;
 
     if (updateTickNoise || typeof stock.r3TickNoisePct !== 'number') {
       // Continuous random noise factor between -0.95% and +0.95% per 1-second tick
       stock.r3TickNoisePct = Math.round(((Math.random() * 1.90) - 0.95) * 100) / 100;
     }
 
-    // Calculate total Net Investment (NI) across all active player orders in Round 3
     let totalLongQty = 0;
     let totalShortQty = 0;
-
     room.players.forEach(player => {
       const item = player.portfolio[stock.ticker];
       if (item) {
@@ -497,47 +489,38 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       }
     });
 
-    const currentNI = (totalLongQty - totalShortQty) * baseR2Price;
-    const deltaNI = currentNI - stock.r3BaselineNI;
+    const currentNI = (totalLongQty - totalShortQty) * basePrice;
+    const netInvestmentRupees = currentNI - stock.r3BaselineNI;
 
-    // NI Demand % Change = (deltaNI / 1,000,000) * 2%  (1% shift per ₹5,00,000 NI delta)
-    const uncappedDemandPercent = (deltaNI / 1000000) * 2;
-    const noisePercent = stock.r3TickNoisePct || 0;
+    const demandPercent = (netInvestmentRupees / 1000000) * 2;
+    const currentTickNoise = stock.r3TickNoisePct || 0;
 
-    // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise % (-0.95% to +0.95%)
-    const rawTotalPercentChange = uncappedDemandPercent + noisePercent;
+    const totalPercentChange = Math.round((demandPercent + currentTickNoise) * 100) / 100;
+    let calculatedPrice;
 
-    // Enforce Strict 2-Decimal Precision Check for Total Displayed Price Shift
-    const totalShift = Math.round(rawTotalPercentChange * 100) / 100;
-
-    let finalChangePct = totalShift;
-
-    if (totalShift >= 10.0) {
-      // Over-Surge Circuit Breaker Threshold (>= +10.0%): Permanently crash base reference by -30% (Stealth Execution)
-      stock.circuitBreakerTriggered = true;
-      stock.crashedBasePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
-      stock.round2ClosePrice = stock.crashedBasePrice;
-      stock.round2ClosingPrice = stock.crashedBasePrice;
-      stock.r3BaselineNI = currentNI; // Lock baseline NI to crash moment so demand delta resets to 0
-      baseR2Price = stock.crashedBasePrice;
-      finalChangePct = noisePercent; // Price starts at new crashed base + tick noise
-
-      console.log(`⚡ STICKY CRASH: ${stock.ticker} total surge = ${totalShift.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
-
-    } else if (totalShift <= -10.0) {
-      // Short Squeeze Threshold (<= -10.0%): Permanently jump base reference by +30% (Stealth Execution)
-      stock.circuitBreakerTriggered = true;
-      stock.crashedBasePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
-      stock.round2ClosePrice = stock.crashedBasePrice;
-      stock.round2ClosingPrice = stock.crashedBasePrice;
-      stock.r3BaselineNI = currentNI; // Lock baseline NI to squeeze moment so demand delta resets to 0
-      baseR2Price = stock.crashedBasePrice;
-      finalChangePct = noisePercent; // Price starts at new squeezed base + tick noise
-
-      console.log(`🚀 STICKY SQUEEZE: ${stock.ticker} total drop = ${totalShift.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
+    if (!stock.isCrashed && !stock.isSqueezed && totalPercentChange >= 10.0) {
+      stock.isCrashed = true;
+      basePrice = Math.round((basePrice * 0.70) * 100) / 100;
+      stock.round2ClosePrice = basePrice;
+      stock.round2ClosingPrice = basePrice;
+      stock.r3BaselineNI = currentNI; 
+      calculatedPrice = Math.round((basePrice * (1 + (currentTickNoise / 100))) * 100) / 100;
+      console.log(`⚡ CRASH: ${stock.ticker} shift ${totalPercentChange}% >= 10.0% -> Base locked at -30% (₹${basePrice})`);
+    } else if (!stock.isCrashed && !stock.isSqueezed && totalPercentChange <= -10.0) {
+      stock.isSqueezed = true;
+      basePrice = Math.round((basePrice * 1.30) * 100) / 100;
+      stock.round2ClosePrice = basePrice;
+      stock.round2ClosingPrice = basePrice;
+      stock.r3BaselineNI = currentNI;
+      calculatedPrice = Math.round((basePrice * (1 + (currentTickNoise / 100))) * 100) / 100;
+      console.log(`🚀 SQUEEZE: ${stock.ticker} shift ${totalPercentChange}% <= -10.0% -> Base locked at +30% (₹${basePrice})`);
+    } else if (stock.isCrashed || stock.isSqueezed) {
+      // If already crashed or squeezed, it just flickers around the new locked basePrice using tick noise
+      calculatedPrice = Math.round((basePrice * (1 + (currentTickNoise / 100))) * 100) / 100;
+    } else {
+      calculatedPrice = Math.round((basePrice * (1 + (totalPercentChange / 100))) * 100) / 100;
     }
 
-    const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
     stock.price = Math.max(calculatedPrice, 1);
     stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
   });
@@ -656,6 +639,43 @@ io.on('connection', (socket) => {
       isPaused: room.isPaused,
       endTime: room.endTime
     });
+  });
+
+  socket.on('room:getLatestState', (data) => {
+    const targetRoomCode = (data && data.roomCode) || socket.roomCode;
+    const room = rooms.get(targetRoomCode);
+    if (!room || !room.gameStarted) return;
+
+    // Send the full market and portfolio state immediately
+    const stockData = room.stocks.map(s => ({
+      ticker: s.ticker,
+      name: s.name,
+      price: Math.round(s.price * 100) / 100,
+      changePercent: s.changePercent,
+    }));
+    socket.emit('priceUpdate', { stocks: stockData });
+
+    const player = room.players.get(socket.id);
+    if (player) {
+      const netWorth = calculateNetWorth(player, room.stocks);
+      const stockValue = netWorth - player.cash;
+      socket.emit('portfolioUpdate', {
+        cash: player.cash,
+        availableCash: player.cash,
+        blockedMargin: 0,
+        portfolioDetails: player.portfolio,
+        stockPositions: player.portfolio,
+        stockValue: stockValue,
+        netWorth: netWorth,
+        stocks: stockData
+      });
+    }
+
+    const list = [];
+    room.players.forEach((p, id) => list.push({ name: p.name, id, netWorth: calculateNetWorth(p, room.stocks) }));
+    list.sort((a, b) => b.netWorth - a.netWorth);
+    list.forEach((p, i) => p.rank = i + 1);
+    socket.emit('leaderboard', list);
   });
 
   socket.on('createRoom', ({ playerName, durationMinutes }) => {

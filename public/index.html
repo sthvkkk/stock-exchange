@@ -413,6 +413,7 @@
             if (document.visibilityState === 'visible') {
                 if (roomCode && socket && socket.connected) {
                     socket.emit('room:syncTime', { roomCode });
+                    socket.emit('room:getLatestState', { roomCode });
                 }
                 attemptMasterReconnect();
             }
@@ -421,6 +422,7 @@
         window.addEventListener('focus', () => {
             if (roomCode && socket && socket.connected) {
                 socket.emit('room:syncTime', { roomCode });
+                socket.emit('room:getLatestState', { roomCode });
             }
             attemptMasterReconnect();
         });
