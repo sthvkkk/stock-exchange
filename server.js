@@ -315,11 +315,11 @@ function startGame(roomCode, room) {
 
   if (room.mode === 'standard') {
     room.timer = room.durationSeconds || 600;
-    room.endTime = Date.now() + (room.timer * 1000);
+    room.roundEndTime = Date.now() + (room.timer * 1000);
   } else if (room.mode === 'match') {
     room.phase = 'round1';
     room.phaseTimer = 600; // Round 1: 10 mins
-    room.endTime = Date.now() + (room.phaseTimer * 1000);
+    room.roundEndTime = Date.now() + (room.phaseTimer * 1000);
     room.isMarketFrozen = false;
   }
 
@@ -337,9 +337,10 @@ function startGame(roomCode, room) {
     phase: room.phase,
     isMarketFrozen: room.isMarketFrozen,
     isPaused: room.isPaused || false,
-    endTime: room.endTime
+    endTime: room.roundEndTime
   });
 
+  io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime });
   broadcastPortfolios(roomCode, room);
   broadcastLeaderboard(roomCode, room);
 
@@ -347,30 +348,22 @@ function startGame(roomCode, room) {
   room.tickInterval = setInterval(() => {
     if (room.isPaused) {
       // Game paused by Master: push end time forward
-      room.endTime += 1000;
-      io.to(roomCode).emit('timerUpdate', {
-        remaining: room.mode === 'standard' ? room.timer : room.phaseTimer,
-        phase: room.phase,
-        isMarketFrozen: true,
-        isPaused: true,
-        endTime: room.endTime
-      });
+      room.roundEndTime += 1000;
       return;
     }
 
     if (room.mode === 'standard') {
-      room.timer = Math.max(0, Math.ceil((room.endTime - Date.now()) / 1000));
+      room.timer = Math.max(0, Math.ceil((room.roundEndTime - Date.now()) / 1000));
       tickPrices(room);
       broadcastPrices(roomCode, room);
       broadcastLeaderboard(roomCode, room);
       broadcastPortfolios(roomCode, room);
-      io.to(roomCode).emit('timerUpdate', { remaining: room.timer, phase: 'standard', isMarketFrozen: false, isPaused: false, endTime: room.endTime });
 
       if (room.timer <= 0) {
         endGame(roomCode, room);
       }
     } else if (room.mode === 'match') {
-      room.phaseTimer = Math.max(0, Math.ceil((room.endTime - Date.now()) / 1000));
+      room.phaseTimer = Math.max(0, Math.ceil((room.roundEndTime - Date.now()) / 1000));
 
       if (room.phase === 'round1' && !room.isMarketFrozen) {
         // Round 1 discrete scheduled jumps:
@@ -435,14 +428,6 @@ function startGame(roomCode, room) {
 
       broadcastLeaderboard(roomCode, room);
       broadcastPortfolios(roomCode, room);
-
-      io.to(roomCode).emit('timerUpdate', {
-        remaining: room.phaseTimer,
-        phase: room.phase,
-        isMarketFrozen: room.isMarketFrozen,
-        isPaused: false,
-        endTime: room.endTime
-      });
 
       // Match Phase Progression
       if (room.phaseTimer <= 0) {
@@ -534,19 +519,19 @@ function advanceMatchPhase(roomCode, room) {
   if (room.phase === 'round1') {
     room.phase = 'break1';
     room.phaseTimer = 300; // Break 1: 5 mins
-    room.endTime = Date.now() + (room.phaseTimer * 1000);
+    room.roundEndTime = Date.now() + (room.phaseTimer * 1000);
     room.isMarketFrozen = true;
   } else if (room.phase === 'break1') {
     room.phase = 'round2';
     room.phaseTimer = 600; // Round 2: 10 mins
-    room.endTime = Date.now() + (room.phaseTimer * 1000);
+    room.roundEndTime = Date.now() + (room.phaseTimer * 1000);
     room.round2NewsIndex = 0;
     room.round2NewsTimer = 0;
     room.isMarketFrozen = false;
   } else if (room.phase === 'round2') {
     room.phase = 'break2';
     room.phaseTimer = 300; // Break 2: 5 mins
-    room.endTime = Date.now() + (room.phaseTimer * 1000);
+    room.roundEndTime = Date.now() + (room.phaseTimer * 1000);
     room.isMarketFrozen = true;
 
     // Capture and store each stock's final Round 2 closing price as round2ClosePrice
@@ -560,7 +545,7 @@ function advanceMatchPhase(roomCode, room) {
   } else if (room.phase === 'break2') {
     room.phase = 'round3';
     room.phaseTimer = 600; // Round 3: 10 mins
-    room.endTime = Date.now() + (room.phaseTimer * 1000);
+    room.roundEndTime = Date.now() + (room.phaseTimer * 1000);
     room.isMarketFrozen = false;
 
     // Ensure round2ClosePrice is stored for all stocks
@@ -583,11 +568,12 @@ function advanceMatchPhase(roomCode, room) {
     return;
   }
 
+  io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime });
   io.to(roomCode).emit('phaseChanged', {
     phase: room.phase,
     phaseTimer: room.phaseTimer,
     isMarketFrozen: room.isMarketFrozen,
-    endTime: room.endTime
+    endTime: room.roundEndTime
   });
   console.log(`⏱️ Match ${roomCode} phase changed to ${room.phase}`);
 }
@@ -637,8 +623,9 @@ io.on('connection', (socket) => {
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
-      endTime: room.endTime
+      endTime: room.roundEndTime
     });
+    socket.emit('timer:sync', { roundEndTime: room.roundEndTime });
   });
 
   socket.on('room:getLobbyState', (data) => {
@@ -683,6 +670,7 @@ io.on('connection', (socket) => {
     list.sort((a, b) => b.netWorth - a.netWorth);
     list.forEach((p, i) => p.rank = i + 1);
     socket.emit('leaderboard', list);
+    socket.emit('timer:sync', { roundEndTime: room.roundEndTime });
   });
 
   socket.on('createRoom', ({ playerName, durationMinutes }) => {
@@ -794,6 +782,7 @@ io.on('connection', (socket) => {
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can pause/resume.' });
 
     room.isPaused = !room.isPaused;
+    io.to(roomCodeStr).emit('timer:sync', { roundEndTime: room.roundEndTime });
     io.to(roomCodeStr).emit('matchStateUpdated', {
       isPaused: room.isPaused,
       isMarketFrozen: room.isMarketFrozen || room.isPaused,
@@ -829,7 +818,8 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Round is already in a break window.' });
     }
 
-    io.to(roomCodeStr).emit('phaseChanged', {
+    io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime });
+    io.to(roomCode).emit('phaseChanged', {
       phase: room.phase,
       phaseTimer: room.phaseTimer,
       isMarketFrozen: room.isMarketFrozen,
@@ -861,8 +851,8 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Can only extend break during a break phase!' });
     }
 
-    room.endTime += (300 * 1000);
-    const remainingSeconds = Math.max(0, Math.floor((room.endTime - Date.now()) / 1000));
+    room.roundEndTime += (300 * 1000);
+    const remainingSeconds = Math.max(0, Math.floor((room.roundEndTime - Date.now()) / 1000));
     room.phaseTimer = remainingSeconds;
 
     io.to(roomCodeStr).emit('timerUpdate', {
@@ -870,9 +860,9 @@ io.on('connection', (socket) => {
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
-      endTime: room.endTime
+      endTime: room.roundEndTime
     });
-    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.endTime });
+    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.roundEndTime });
     io.to(roomCodeStr).emit('matchStateUpdated', {
       message: 'Break extended by +5 minutes by Master!',
     });
@@ -890,8 +880,8 @@ io.on('connection', (socket) => {
       return socket.emit('masterActionResult', { success: false, message: 'No active round to extend.' });
     }
 
-    room.endTime += (300 * 1000);
-    const remainingSeconds = Math.max(0, Math.floor((room.endTime - Date.now()) / 1000));
+    room.roundEndTime += (300 * 1000);
+    const remainingSeconds = Math.max(0, Math.floor((room.roundEndTime - Date.now()) / 1000));
 
     if (room.mode === 'match') {
       room.phaseTimer = remainingSeconds;
@@ -904,9 +894,9 @@ io.on('connection', (socket) => {
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
-      endTime: room.endTime
+      endTime: room.roundEndTime
     });
-    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.endTime });
+    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.roundEndTime });
 
     socket.emit('masterActionResult', { success: true, message: 'Round extended by 5 minutes' });
     io.to(roomCodeStr).emit('matchStateUpdated', { message: 'Round extended by +5 minutes by Master!' });
@@ -924,8 +914,8 @@ io.on('connection', (socket) => {
       return socket.emit('masterActionResult', { success: false, message: 'No active round to decrease.' });
     }
 
-    room.endTime -= (60 * 1000);
-    const remainingSeconds = Math.max(0, Math.floor((room.endTime - Date.now()) / 1000));
+    room.roundEndTime -= (60 * 1000);
+    const remainingSeconds = Math.max(0, Math.floor((room.roundEndTime - Date.now()) / 1000));
 
     if (room.mode === 'match') {
       room.phaseTimer = remainingSeconds;
@@ -956,9 +946,9 @@ io.on('connection', (socket) => {
       phase: room.phase,
       isMarketFrozen: room.isMarketFrozen,
       isPaused: room.isPaused,
-      endTime: room.endTime
+      endTime: room.roundEndTime
     });
-    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.endTime });
+    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.roundEndTime });
 
     socket.emit('masterActionResult', { success: true, message: 'Round reduced by 1 minute' });
     io.to(roomCodeStr).emit('matchStateUpdated', { message: 'Round reduced by -1 minute by Master!' });

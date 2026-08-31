@@ -1058,37 +1058,31 @@
                 if(data.message) showToast(data.message, data.success ? 'success' : 'error');
             });
 
-            // --- WEB WORKER BACKGROUND TIMER ---
-            const workerCode = `
-                let tickInterval;
-                self.onmessage = function(e) {
-                    if (e.data === 'start') {
-                        if (tickInterval) clearInterval(tickInterval);
-                        tickInterval = setInterval(() => {
-                            self.postMessage('tick');
-                        }, 1000);
-                    } else if (e.data === 'stop') {
-                        if (tickInterval) clearInterval(tickInterval);
-                    }
-                };
-            `;
-            const blob = new Blob([workerCode], {type: 'application/javascript'});
-            const tickWorker = new Worker(URL.createObjectURL(blob));
+            // --- LOCAL CLOCK UI RENDER LOOP ---
+            if (window.localClockInterval) clearInterval(window.localClockInterval);
             
-            tickWorker.onmessage = () => {
-                if (roomCode && socket && socket.connected) {
-                    socket.emit('room:syncTime', { roomCode });
-                    if (window.currentEndTime && !isPaused) {
-                        const remaining = Math.max(0, Math.floor((window.currentEndTime - Date.now()) / 1000));
-                        updateTimerUI(remaining);
+            function updateClockDisplay() {
+                if (!window.targetRoundEndTime) return;
+                
+                let remainingMs;
+                if (isPaused) {
+                    // When paused, freeze the timer visually.
+                    if (window.frozenRemainingMs === undefined) {
+                         window.frozenRemainingMs = Math.max(0, window.targetRoundEndTime - Date.now());
                     }
+                    remainingMs = window.frozenRemainingMs;
+                } else {
+                    window.frozenRemainingMs = undefined;
+                    remainingMs = Math.max(0, window.targetRoundEndTime - Date.now());
                 }
-            };
-            tickWorker.postMessage('start');
-
-            function updateTimerUI(remaining) {
-                const m = Math.floor(remaining / 60).toString().padStart(2, '0');
-                const s = (remaining % 60).toString().padStart(2, '0');
+                
+                const totalSeconds = Math.floor(remainingMs / 1000);
+                
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                const display = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                
+                const remaining = totalSeconds;
 
                 const isRoundActive = (currentPhase && currentPhase.startsWith('round') && !isMarketFrozen && currentPhase !== 'finished') || (currentPhase === 'standard' && !isMarketFrozen && remaining > 0);
                 const canDecrease = isRoundActive && remaining >= 60;
@@ -1114,7 +1108,7 @@
                 }
 
                 if(isMaster) {
-                    document.getElementById('masterTimerDisplay').textContent = `${m}:${s}`;
+                    document.getElementById('masterTimerDisplay').textContent = display;
                     document.getElementById('masterPhaseLabel').textContent = isPaused ? 'PAUSED' : (currentPhase ? currentPhase.toUpperCase() : 'MATCH');
                     const badge = document.getElementById('masterFreezeBadge');
                     if(isPaused) {
@@ -1129,7 +1123,7 @@
                     }
                     if (currentStocks) renderStocks(Object.values(currentStocks));
                 } else {
-                    document.getElementById('timerDisplay').textContent = `${m}:${s}`;
+                    document.getElementById('timerDisplay').textContent = display;
                     if(currentPhase && currentPhase !== 'standard') {
                         const badge = document.getElementById('arenaPhaseBadge');
                         if (badge) {
@@ -1138,27 +1132,25 @@
                     }
                 }
             }
+            window.localClockInterval = setInterval(updateClockDisplay, 1000);
 
-            socket.on('timerUpdate', (data) => {
+            socket.on('timer:sync', (data) => {
+                if(data.roundEndTime) {
+                    window.targetRoundEndTime = data.roundEndTime;
+                    updateClockDisplay();
+                }
+            });
+
+            socket.on('phaseChanged', (data) => {
                 isMarketFrozen = data.isMarketFrozen || false;
-                isPaused = data.isPaused || false;
                 if(data.phase) currentPhase = data.phase;
-                if(data.endTime) window.currentEndTime = data.endTime;
-
+                if(data.endTime) window.targetRoundEndTime = data.endTime;
+                
                 if (currentPhase === 'round3') {
                     const banner = document.getElementById('newsBanner');
                     if (banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
                 }
-
-                updateTimerUI(data.remaining);
-            });
-
-            socket.on('timer:update', (data) => {
-                if(data.roundEndTime) {
-                    window.currentEndTime = data.roundEndTime;
-                    const remaining = Math.max(0, Math.floor((window.currentEndTime - Date.now()) / 1000));
-                    updateTimerUI(remaining);
-                }
+                updateClockDisplay();
             });
 
             socket.on('matchStateUpdated', (data) => {
