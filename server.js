@@ -210,10 +210,12 @@ function calculateNetWorth(player, stocks) {
 
   return {
     cash: Math.round(player.cash * 100) / 100,
+    availableCash: Math.round(player.cash * 100) / 100,
     blockedMargin: Math.round(shortCollateral * 100) / 100,
     stockValue: Math.round(stockValue * 100) / 100,
     netWorth: Math.round(netWorth * 100) / 100,
     portfolioDetails,
+    stockPositions: portfolioDetails,
   };
 }
 
@@ -236,13 +238,24 @@ function broadcastLeaderboard(roomCode, room) {
 
 function broadcastPortfolios(roomCode, room) {
   room.players.forEach((player, id) => {
-    const { cash, stockValue, netWorth, portfolioDetails } = calculateNetWorth(player, room.stocks);
-    io.to(id).emit('portfolioUpdate', {
+    const { cash, availableCash, blockedMargin, stockValue, netWorth, portfolioDetails, stockPositions } = calculateNetWorth(player, room.stocks);
+    const payload = {
       cash,
+      availableCash,
+      blockedMargin,
       stockValue,
       netWorth,
       portfolioDetails,
-    });
+      stockPositions,
+      stocks: room.stocks.map(s => ({
+        ticker: s.ticker,
+        name: s.name,
+        price: Math.round(s.price * 100) / 100,
+        changePercent: Math.round(s.changePercent * 100) / 100,
+      }))
+    };
+    io.to(id).emit('portfolioUpdate', payload);
+    io.to(id).emit('playerState', payload);
   });
 }
 
@@ -984,7 +997,7 @@ io.on('connection', (socket) => {
   });
 
   // Trade Execution (Separate LONG and SHORT tracking per ticker)
-  socket.on('executeTrade', ({ roomCode, ticker, action, quantity }) => {
+  const handleExecuteTrade = ({ roomCode, ticker, action, type, quantity }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) {
       socket.emit('tradeResult', { success: false, message: 'Game not active.' });
@@ -1095,10 +1108,13 @@ io.on('connection', (socket) => {
       }
     }
 
-    recalculateRound3Prices(roomCode, room);
-    broadcastPortfolios(roomCode, room);
-    broadcastLeaderboard(roomCode, room);
-  });
+    recalculateRound3Prices(targetRoomCode, room);
+    broadcastPortfolios(targetRoomCode, room);
+    broadcastLeaderboard(targetRoomCode, room);
+  };
+
+  socket.on('executeTrade', handleExecuteTrade);
+  socket.on('trade:execute', handleExecuteTrade);
 
   // Dedicated One-Click Close Position Socket Handler
   socket.on('closePosition', ({ roomCode, ticker, type }) => {

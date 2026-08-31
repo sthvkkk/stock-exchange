@@ -544,20 +544,30 @@
 
         function executeTrade(action) {
             if(isMarketFrozen) return showToast('Market is frozen during break!');
-            const qty = parseInt(tradeQtyInput.value) || 0;
-            if(qty <= 0) return;
+            const qtyVal = parseInt(tradeQtyInput.value, 10);
+            if(isNaN(qtyVal) || qtyVal <= 0) return showToast('Please enter a valid quantity');
+            
+            const payload = {
+                roomCode: getActiveRoomCode(),
+                ticker: selectedTickerForTrade,
+                action: action,
+                type: action,
+                quantity: qtyVal
+            };
+
             if(socket) {
-                socket.emit('executeTrade', {
-                    roomCode,
-                    ticker: selectedTickerForTrade,
-                    action,
-                    quantity: qty
-                });
+                socket.emit('executeTrade', payload);
+                socket.emit('trade:execute', payload);
             }
         }
 
-        document.getElementById('btnBuy').addEventListener('click', () => executeTrade('BUY'));
-        document.getElementById('btnSell').addEventListener('click', () => executeTrade('SELL'));
+        const btnBuy = document.getElementById('btnBuy');
+        const btnSell = document.getElementById('btnSell');
+        const confirmTradeBtn = document.getElementById('confirmTradeBtn');
+
+        if (btnBuy) btnBuy.addEventListener('click', () => executeTrade('BUY'));
+        if (btnSell) btnSell.addEventListener('click', () => executeTrade('SELL'));
+        if (confirmTradeBtn) confirmTradeBtn.addEventListener('click', () => executeTrade('BUY'));
 
         // RENDER STOCK CATALOG CARDS
         function renderStocks(stocksArray) {
@@ -1031,22 +1041,30 @@
                 if(banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
             });
 
-            socket.on('portfolioUpdate', (data) => {
-                currentCash = data.cash || 0;
-                currentPortfolioDetails = data.portfolioDetails || {};
+            const handlePlayerStateUpdate = (data) => {
+                if (!data) return;
+                currentCash = typeof data.availableCash === 'number' ? data.availableCash : (data.cash || 0);
+                currentPortfolioDetails = data.portfolioDetails || data.stockPositions || {};
                 
-                document.getElementById('statCash').textContent = formatMoney(currentCash);
-                document.getElementById('statStockValue').textContent = formatMoney(data.stockValue || 0);
-                document.getElementById('statNetWorth').textContent = formatMoney(data.netWorth || 0);
-                document.getElementById('navNetWorth').textContent = formatMoney(data.netWorth || 0);
+                const statCashEl = document.getElementById('statCash');
+                if (statCashEl) statCashEl.textContent = formatMoney(currentCash);
+
+                const statStockValEl = document.getElementById('statStockValue');
+                if (statStockValEl) statStockValEl.textContent = formatMoney(data.stockValue || 0);
+
+                const statNetWorthEl = document.getElementById('statNetWorth');
+                if (statNetWorthEl) statNetWorthEl.textContent = formatMoney(data.netWorth || 0);
+
+                const navNetWorthEl = document.getElementById('navNetWorth');
+                if (navNetWorthEl) navNetWorthEl.textContent = formatMoney(data.netWorth || 0);
 
                 const marginSubtext = document.getElementById('marginSubtext');
                 if (marginSubtext) {
                     let totalBlocked = typeof data.blockedMargin === 'number' ? data.blockedMargin : 0;
                     if (totalBlocked <= 0 && currentPortfolioDetails) {
                         Object.values(currentPortfolioDetails).forEach(item => {
-                            if (item.shortQty > 0) {
-                                totalBlocked += (item.shortQty * item.shortAvgPrice * 0.20);
+                            if (item && item.shortQty > 0) {
+                                totalBlocked += (item.shortQty * (item.shortAvgPrice || 0) * 0.20);
                             }
                         });
                     }
@@ -1060,8 +1078,11 @@
                 }
                 
                 renderPortfolioTable(currentPortfolioDetails);
-                renderStocks(Object.values(currentStocks));
-            });
+                if (currentStocks) renderStocks(Object.values(currentStocks));
+            };
+
+            socket.on('portfolioUpdate', handlePlayerStateUpdate);
+            socket.on('playerState', handlePlayerStateUpdate);
 
             socket.on('leaderboard', (data) => {
                 renderLeaderboard(data);
