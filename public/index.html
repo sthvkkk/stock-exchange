@@ -252,6 +252,9 @@
                 <button id="btnMasterExtendRound" onclick="masterExtendRound()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span>Extend Round (+5 Mins)</span>
                 </button>
+                <button id="btnMasterDecreaseRound" onclick="masterDecreaseRound()" class="bg-red-700 hover:bg-red-600 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
+                    <span>Decrease Round (-1 Min)</span>
+                </button>
                 <button id="btnMasterSkipRound" onclick="masterSkipRound()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span>Skip / End Round</span>
                 </button>
@@ -613,6 +616,9 @@
         window.masterExtendRound = () => {
             if(socket && roomCode) socket.emit('master:extendRound', { roomCode });
         };
+        window.masterDecreaseRound = () => {
+            if(socket && roomCode) socket.emit('master:decreaseRound', { roomCode });
+        };
         window.masterSkipRound = () => {
             if(confirm('Are you sure you want to skip / end the current active round immediately?')) {
                 if(socket && roomCode) socket.emit('master:skipRound', { roomCode });
@@ -883,12 +889,21 @@
                 const s = (data.remaining % 60).toString().padStart(2, '0');
 
                 const isRoundActive = (data.phase && data.phase.startsWith('round') && !isMarketFrozen && data.phase !== 'finished') || (data.phase === 'standard' && !isMarketFrozen && data.remaining > 0);
+                const canDecrease = isRoundActive && data.remaining >= 60;
+
                 const btnExtendRound = document.getElementById('btnMasterExtendRound');
+                const btnDecreaseRound = document.getElementById('btnMasterDecreaseRound');
                 const btnSkipRound = document.getElementById('btnMasterSkipRound');
+
                 if (btnExtendRound) {
                     btnExtendRound.disabled = !isRoundActive;
                     btnExtendRound.style.opacity = isRoundActive ? '1' : '0.4';
                     btnExtendRound.style.pointerEvents = isRoundActive ? 'auto' : 'none';
+                }
+                if (btnDecreaseRound) {
+                    btnDecreaseRound.disabled = !canDecrease;
+                    btnDecreaseRound.style.opacity = canDecrease ? '1' : '0.4';
+                    btnDecreaseRound.style.pointerEvents = canDecrease ? 'auto' : 'none';
                 }
                 if (btnSkipRound) {
                     btnSkipRound.disabled = !isRoundActive;

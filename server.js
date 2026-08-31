@@ -715,6 +715,53 @@ io.on('connection', (socket) => {
     console.log(`⌛ Room ${roomCode} round extended +300s by Master`);
   });
 
+  socket.on('master:decreaseRound', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameStarted) return;
+    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can decrease round time.' });
+
+    const isRoundActive = (room.mode === 'match' && room.phase.startsWith('round') && !room.isMarketFrozen) || (room.mode === 'standard' && room.timer > 0);
+    if (!isRoundActive) {
+      return socket.emit('masterActionResult', { success: false, message: 'No active round to decrease.' });
+    }
+
+    if (room.mode === 'match') {
+      room.phaseTimer -= 60; // Subtract 60 seconds
+      if (room.phaseTimer <= 0) {
+        room.phaseTimer = 0;
+        advanceMatchPhase(roomCode, room);
+        socket.emit('masterActionResult', { success: true, message: 'Round successfully ended' });
+        broadcastPrices(roomCode, room);
+        broadcastPortfolios(roomCode, room);
+        broadcastLeaderboard(roomCode, room);
+        return;
+      }
+    } else {
+      room.timer -= 60;
+      if (room.timer <= 0) {
+        room.timer = 0;
+        endGame(roomCode, room);
+        socket.emit('masterActionResult', { success: true, message: 'Round successfully ended' });
+        broadcastPrices(roomCode, room);
+        broadcastPortfolios(roomCode, room);
+        broadcastLeaderboard(roomCode, room);
+        return;
+      }
+    }
+
+    const remaining = room.mode === 'match' ? room.phaseTimer : room.timer;
+    io.to(roomCode).emit('timerUpdate', {
+      remaining,
+      phase: room.phase,
+      isMarketFrozen: room.isMarketFrozen,
+      isPaused: room.isPaused,
+    });
+
+    socket.emit('masterActionResult', { success: true, message: 'Round reduced by 1 minute' });
+    io.to(roomCode).emit('matchStateUpdated', { message: 'Round reduced by -1 minute by Master!' });
+    console.log(`⌛ Room ${roomCode} round decreased -60s by Master`);
+  });
+
   socket.on('master:skipRound', ({ roomCode }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;
