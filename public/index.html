@@ -382,6 +382,7 @@
         let isMaster = false;
         let hostToken = null;
         let gameMode = 'standard';
+        let currentPhase = '';
         let isMarketFrozen = false;
         let playerName = "";
         let currentStocks = {};
@@ -869,8 +870,10 @@
             });
 
             socket.on('newsFlash', (data) => {
+                if (currentPhase === 'round3') return; // Stealth execution in Round 3
                 const banner = document.getElementById('newsBanner');
                 const text = document.getElementById('newsText');
+                if(!banner || !text) return;
                 
                 const isCircuitBreaker = data.headline && data.headline.includes('CIRCUIT BREAKER');
                 banner.className = `overflow-hidden transition-all duration-500 ease-in-out w-full font-bold text-xs sm:text-sm tracking-wide flex items-center ${isCircuitBreaker ? 'bg-rose-950 border-t border-rose-600 text-rose-200 animate-pulse' : 'bg-slate-950 border-t border-slate-800/60 text-slate-200'} h-10 opacity-100`;
@@ -891,7 +894,7 @@
 
             socket.on('clearNewsBanner', () => {
                 const banner = document.getElementById('newsBanner');
-                if(banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500';
+                if(banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
             });
 
             socket.on('portfolioUpdate', (data) => {
@@ -948,6 +951,13 @@
             socket.on('timerUpdate', (data) => {
                 isMarketFrozen = data.isMarketFrozen || false;
                 isPaused = data.isPaused || false;
+                if(data.phase) currentPhase = data.phase;
+
+                if (currentPhase === 'round3') {
+                    const banner = document.getElementById('newsBanner');
+                    if (banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
+                }
+
                 const m = Math.floor(data.remaining / 60).toString().padStart(2, '0');
                 const s = (data.remaining % 60).toString().padStart(2, '0');
 
@@ -1019,6 +1029,11 @@
 
             socket.on('phaseChanged', (data) => {
                 isMarketFrozen = data.isMarketFrozen || false;
+                if(data.phase) currentPhase = data.phase;
+                if (currentPhase === 'round3') {
+                    const banner = document.getElementById('newsBanner');
+                    if (banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
+                }
                 if(isMarketFrozen) {
                     showToast(`Phase changed to ${data.phase.toUpperCase()} — Market is now FROZEN`, 'error');
                 } else {

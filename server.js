@@ -484,32 +484,24 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     let finalChangePct = totalUncappedPct;
 
     if (totalUncappedPct >= 10.0) {
-      // Over-Surge Circuit Breaker Threshold (>= +10%): Permanently crash base reference by -30%
+      // Over-Surge Circuit Breaker Threshold (>= +10%): Permanently crash base reference by -30% (Stealth Execution)
       stock.round2ClosePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
       stock.round2ClosingPrice = stock.round2ClosePrice;
       stock.r3BaselineNI = currentNI; // Lock baseline NI to crash moment
       baseR2Price = stock.round2ClosePrice;
       finalChangePct = stock.r3TickNoisePct || 0; // Price starts at new crashed base + tick noise
 
-      console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalUncappedPct.toFixed(2)}% (>= +10%) -> Permanently crashed base to ₹${baseR2Price}!`);
-      io.to(roomCode).emit('newsFlash', {
-        ticker: stock.ticker,
-        headline: `CIRCUIT BREAKER TRIGGERED: ${stock.ticker} buying surge exceeded +10% threshold! Market crashed -30%!`,
-      });
+      console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalUncappedPct.toFixed(2)}% (>= +10%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
 
     } else if (totalUncappedPct <= -10.0) {
-      // Short Squeeze Threshold (<= -10%): Permanently jump base reference by +30%
+      // Short Squeeze Threshold (<= -10%): Permanently jump base reference by +30% (Stealth Execution)
       stock.round2ClosePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
       stock.round2ClosingPrice = stock.round2ClosePrice;
       stock.r3BaselineNI = currentNI; // Lock baseline NI to squeeze moment
       baseR2Price = stock.round2ClosePrice;
       finalChangePct = stock.r3TickNoisePct || 0; // Price starts at new squeezed base + tick noise
 
-      console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalUncappedPct.toFixed(2)}% (<= -10%) -> Permanently squeezed base to ₹${baseR2Price}!`);
-      io.to(roomCode).emit('newsFlash', {
-        ticker: stock.ticker,
-        headline: `SHORT SQUEEZE TRIGGERED: ${stock.ticker} short selling exceeded -10% threshold! Squeeze rally jumped +30%!`,
-      });
+      console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalUncappedPct.toFixed(2)}% (<= -10%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
     }
 
     const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
