@@ -476,32 +476,36 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     const deltaNI = currentNI - stock.r3BaselineNI;
 
     // NI Demand % Change = (deltaNI / 1,000,000) * 2%  (1% shift per ₹5,00,000 NI delta)
-    const niChangePct = (deltaNI / 1000000) * 2;
+    const uncappedDemandPercent = (deltaNI / 1000000) * 2;
+    const noisePercent = stock.r3TickNoisePct || 0;
 
     // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise %
-    const totalUncappedPct = niChangePct + (stock.r3TickNoisePct || 0);
+    const rawTotalPercentChange = uncappedDemandPercent + noisePercent;
 
-    let finalChangePct = totalUncappedPct;
+    // Enforce Strict 2-Decimal Precision Check
+    const totalPercentChange = Math.round(rawTotalPercentChange * 100) / 100;
 
-    if (totalUncappedPct >= 10.0) {
-      // Over-Surge Circuit Breaker Threshold (>= +10%): Permanently crash base reference by -30% (Stealth Execution)
+    let finalChangePct = totalPercentChange;
+
+    if (totalPercentChange >= 10.0) {
+      // Over-Surge Circuit Breaker Threshold (>= +10.0%): Permanently crash base reference by -30% (Stealth Execution)
       stock.round2ClosePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
       stock.round2ClosingPrice = stock.round2ClosePrice;
       stock.r3BaselineNI = currentNI; // Lock baseline NI to crash moment
       baseR2Price = stock.round2ClosePrice;
-      finalChangePct = stock.r3TickNoisePct || 0; // Price starts at new crashed base + tick noise
+      finalChangePct = noisePercent; // Price starts at new crashed base + tick noise
 
-      console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalUncappedPct.toFixed(2)}% (>= +10%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
+      console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalPercentChange.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
 
-    } else if (totalUncappedPct <= -10.0) {
-      // Short Squeeze Threshold (<= -10%): Permanently jump base reference by +30% (Stealth Execution)
+    } else if (totalPercentChange <= -10.0) {
+      // Short Squeeze Threshold (<= -10.0%): Permanently jump base reference by +30% (Stealth Execution)
       stock.round2ClosePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
       stock.round2ClosingPrice = stock.round2ClosePrice;
       stock.r3BaselineNI = currentNI; // Lock baseline NI to squeeze moment
       baseR2Price = stock.round2ClosePrice;
-      finalChangePct = stock.r3TickNoisePct || 0; // Price starts at new squeezed base + tick noise
+      finalChangePct = noisePercent; // Price starts at new squeezed base + tick noise
 
-      console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalUncappedPct.toFixed(2)}% (<= -10%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
+      console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalPercentChange.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
     }
 
     const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
