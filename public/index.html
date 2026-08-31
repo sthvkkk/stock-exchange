@@ -319,41 +319,43 @@
     </div>
 
     <!-- TRADE MODAL -->
-    <div id="tradeModal" class="hidden fixed right-0 top-0 h-full w-full sm:w-96 z-50 bg-[#0b0f17]/95 backdrop-blur-xl shadow-2xl border-l border-slate-800 flex flex-col p-6 transition-all duration-300">
-        <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
-            <div>
-                <span class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Order Entry</span>
-                <h3 class="text-xl font-bold text-white"><span id="modalTicker" class="text-blue-400"></span></h3>
+    <div id="tradeModal" class="hidden fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex justify-end">
+        <div class="h-full w-full sm:w-96 bg-[#0b0f17] shadow-2xl border-l border-slate-800 flex flex-col p-6 overflow-y-auto">
+            <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                <div>
+                    <span class="text-xs uppercase tracking-wider text-slate-400 font-semibold">Order Entry</span>
+                    <h3 class="text-xl font-bold text-white"><span id="modalTicker" class="text-blue-400"></span></h3>
+                </div>
+                <button id="btnCloseModal" class="bg-[#090d16] hover:bg-slate-800 text-slate-300 border border-slate-700/60 rounded-full w-9 h-9 flex items-center justify-center text-xl transition-all">&times;</button>
             </div>
-            <button id="btnCloseModal" class="bg-[#090d16] hover:bg-slate-800 text-slate-300 border border-slate-700/60 rounded-full w-9 h-9 flex items-center justify-center text-xl transition-all">&times;</button>
-        </div>
-        
-        <div class="mb-6 bg-slate-900 border border-slate-800 p-4 rounded-xl flex justify-between items-center">
-            <span class="text-slate-400 text-xs uppercase tracking-wider">Live Price</span>
-            <span id="modalPrice" class="text-xl font-extrabold text-white"></span>
-        </div>
+            
+            <div class="mb-6 bg-slate-900 border border-slate-800 p-4 rounded-xl flex justify-between items-center">
+                <span class="text-slate-400 text-xs uppercase tracking-wider">Live Price</span>
+                <span id="modalPrice" class="text-xl font-extrabold text-white"></span>
+            </div>
 
-        <div class="space-y-4 mb-6">
-            <div>
-                <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Quantity</label>
-                <input type="number" id="tradeQuantity" min="1" value="1" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-base focus:outline-none focus:border-blue-500">
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Quantity</label>
+                    <input type="number" id="tradeQuantity" min="1" value="1" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-white text-base focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="flex justify-between text-sm py-1 border-b border-slate-800/60">
+                    <span class="text-slate-400">Total Value:</span>
+                    <span id="modalTotalValue" class="font-bold text-white"></span>
+                </div>
+                <div class="flex justify-between text-xs text-slate-400">
+                    <span>Held: <span id="modalOwned" class="text-slate-200 font-semibold">0 shares</span></span>
+                    <span>Max Affordable: <span id="modalMaxBuy" class="text-slate-200 font-semibold">0</span></span>
+                </div>
+                <p id="shortSellingNotice" class="hidden text-[11px] text-blue-400 italic">Match Mode: Shorting reserves position value as margin collateral from available cash.</p>
             </div>
-            <div class="flex justify-between text-sm py-1 border-b border-slate-800/60">
-                <span class="text-slate-400">Total Value:</span>
-                <span id="modalTotalValue" class="font-bold text-white"></span>
-            </div>
-            <div class="flex justify-between text-xs text-slate-400">
-                <span>Held: <span id="modalOwned" class="text-slate-200 font-semibold">0 shares</span></span>
-                <span>Max Affordable: <span id="modalMaxBuy" class="text-slate-200 font-semibold">0</span></span>
-            </div>
-            <p id="shortSellingNotice" class="hidden text-[11px] text-blue-400 italic">Match Mode: Shorting reserves position value as margin collateral from available cash.</p>
-        </div>
 
-        <div id="modalError" class="hidden mb-4 text-xs text-slate-200 bg-slate-800 p-3 rounded-xl border border-slate-700"></div>
+            <div id="modalError" class="hidden mb-4 text-xs text-slate-200 bg-slate-800 p-3 rounded-xl border border-slate-700"></div>
 
-        <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-slate-800">
-            <button id="btnBuy" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-950/50 transition-all text-base touch-manipulation">BUY</button>
-            <button id="btnSell" class="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-rose-950/50 transition-all text-base touch-manipulation">SELL</button>
+            <div class="grid grid-cols-2 gap-4 mt-auto pt-4 border-t border-slate-800">
+                <button id="btnBuy" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-emerald-950/50 transition-all text-base touch-manipulation">BUY</button>
+                <button id="btnSell" class="bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg shadow-rose-950/50 transition-all text-base touch-manipulation">SELL</button>
+            </div>
         </div>
     </div>
 
@@ -440,7 +442,11 @@
             });
         });
 
-        const formatMoney = (val) => Number(val).toLocaleString('en-IN', { style: 'currency', currency: 'INR' });
+        const formatMoney = (val) => {
+            const num = Number(val);
+            if (typeof num !== 'number' || !isFinite(num) || isNaN(num)) return '₹0.00';
+            return num.toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+        };
         
         const views = {
             lobby: document.getElementById('lobby'),
@@ -501,16 +507,26 @@
         function updateTradeModalVals() {
             if(!selectedTickerForTrade || !currentStocks[selectedTickerForTrade]) return;
             const price = currentStocks[selectedTickerForTrade].price;
-            const qty = parseInt(tradeQtyInput.value) || 0;
+            let rawQty = parseInt(tradeQtyInput.value, 10);
+            if (!isFinite(rawQty) || isNaN(rawQty) || rawQty < 0) rawQty = 0;
+            const qty = Math.min(rawQty, Number.MAX_SAFE_INTEGER);
+
             document.getElementById('modalPrice').textContent = formatMoney(price);
-            document.getElementById('modalTotalValue').textContent = formatMoney(price * qty);
+            
+            const totalVal = price * qty;
+            document.getElementById('modalTotalValue').textContent = isFinite(totalVal) ? formatMoney(totalVal) : '₹0.00';
             
             const detail = currentPortfolioDetails[selectedTickerForTrade] || { qty: 0 };
             const owned = detail.qty || 0;
-            const maxBuy = Math.floor(currentCash / price);
             
-            document.getElementById('modalOwned').textContent = `${owned} shares ${owned < 0 ? '(SHORT)' : ''}`;
-            document.getElementById('modalMaxBuy').textContent = maxBuy;
+            let maxBuy = 0;
+            if (price > 0 && isFinite(currentCash) && currentCash > 0) {
+                const calculatedMaxBuy = Math.floor(currentCash / price);
+                maxBuy = isFinite(calculatedMaxBuy) ? Math.min(calculatedMaxBuy, Number.MAX_SAFE_INTEGER) : 0;
+            }
+
+            document.getElementById('modalOwned').textContent = `${owned.toLocaleString('en-IN')} shares ${owned < 0 ? '(SHORT)' : ''}`;
+            document.getElementById('modalMaxBuy').textContent = maxBuy.toLocaleString('en-IN');
 
             if(gameMode === 'match') {
                 document.getElementById('shortSellingNotice').classList.remove('hidden');
@@ -522,6 +538,7 @@
         tradeQtyInput.addEventListener('input', updateTradeModalVals);
         document.getElementById('btnCloseModal').addEventListener('click', () => {
             modals.trade.classList.add('hidden');
+            modals.trade.style.display = 'none';
             document.getElementById('modalError').classList.add('hidden');
         });
 
@@ -820,6 +837,7 @@
             document.getElementById('modalError').classList.add('hidden');
             updateTradeModalVals();
             modals.trade.classList.remove('hidden');
+            modals.trade.style.display = 'flex';
         };
 
         function renderLeaderboard(board) {

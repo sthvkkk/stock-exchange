@@ -1014,8 +1014,8 @@ io.on('connection', (socket) => {
     }
 
     const qty = parseInt(quantity, 10);
-    if (!qty || qty <= 0) {
-      socket.emit('tradeResult', { success: false, message: 'Invalid quantity.' });
+    if (!qty || qty <= 0 || !isFinite(qty) || qty > Number.MAX_SAFE_INTEGER) {
+      socket.emit('tradeResult', { success: false, message: 'Invalid or excessive order quantity.' });
       return;
     }
 
@@ -1025,6 +1025,11 @@ io.on('connection', (socket) => {
 
     const item = player.portfolio[ticker];
     const totalCost = stock.price * qty;
+
+    if (!isFinite(totalCost) || totalCost <= 0 || totalCost > Number.MAX_SAFE_INTEGER) {
+      socket.emit('tradeResult', { success: false, message: 'Total order value exceeds safe integer limits.' });
+      return;
+    }
 
     if (action === 'BUY') {
       if (player.cash < totalCost) {
