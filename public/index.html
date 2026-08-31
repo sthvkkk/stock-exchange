@@ -380,6 +380,7 @@
         let roomCode = null;
         let isHost = false;
         let isMaster = false;
+        let hostToken = null;
         let gameMode = 'standard';
         let isMarketFrozen = false;
         let playerName = "";
@@ -388,6 +389,32 @@
         let currentCash = 1000000;
         let selectedTickerForTrade = null;
         let selectedDuration = '10';
+
+        function attemptMasterReconnect() {
+            const sessionStr = sessionStorage.getItem('mockstock_master_session');
+            if (!sessionStr) return;
+            try {
+                const session = JSON.parse(sessionStr);
+                if (session.roomCode && session.isHost && session.hostToken) {
+                    if (socket && socket.connected) {
+                        socket.emit('master:reconnect', {
+                            roomCode: session.roomCode,
+                            hostToken: session.hostToken
+                        });
+                    }
+                }
+            } catch(e) {}
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                attemptMasterReconnect();
+            }
+        });
+
+        window.addEventListener('focus', () => {
+            attemptMasterReconnect();
+        });
 
         // DURATION SELECTOR LOGIC
         document.querySelectorAll('.duration-btn').forEach(btn => {
@@ -453,7 +480,7 @@
         });
 
         document.getElementById('btnStartGame').addEventListener('click', () => {
-            if(socket && isHost) socket.emit('startGame', { roomCode });
+            if(socket && isHost) socket.emit('startGame', { roomCode, hostToken });
         });
 
         // TRADE MODAL
@@ -602,8 +629,8 @@
             if(!input) return;
             const newPrice = parseFloat(input.value);
             if(isNaN(newPrice) || newPrice <= 0) return showToast('Enter valid price');
-            socket.emit('masterUpdatePrice', { roomCode, ticker, newPrice });
-            socket.emit('master:setPrice', { roomCode, ticker, newPrice });
+            socket.emit('masterUpdatePrice', { roomCode, ticker, newPrice, hostToken });
+            socket.emit('master:setPrice', { roomCode, ticker, newPrice, hostToken });
             const currentDisplay = document.getElementById(`masterCurrentPrice-${ticker}`);
             if(currentDisplay) currentDisplay.textContent = formatMoney(newPrice);
             showToast(`Updated ${ticker} price to ₹${newPrice}`, 'success');
@@ -611,31 +638,31 @@
 
         // MASTER CONTROL SUITE ACTIONS
         window.masterTogglePause = () => {
-            if(socket && roomCode) socket.emit('master:togglePause', { roomCode });
+            if(socket && roomCode) socket.emit('master:togglePause', { roomCode, hostToken });
         };
         window.masterExtendRound = () => {
-            if(socket && roomCode) socket.emit('master:extendRound', { roomCode });
+            if(socket && roomCode) socket.emit('master:extendRound', { roomCode, hostToken });
         };
         window.masterDecreaseRound = () => {
-            if(socket && roomCode) socket.emit('master:decreaseRound', { roomCode });
+            if(socket && roomCode) socket.emit('master:decreaseRound', { roomCode, hostToken });
         };
         window.masterSkipRound = () => {
             if(confirm('Are you sure you want to skip / end the current active round immediately?')) {
-                if(socket && roomCode) socket.emit('master:skipRound', { roomCode });
+                if(socket && roomCode) socket.emit('master:skipRound', { roomCode, hostToken });
             }
         };
         window.masterSkipToBreak = () => {
-            if(socket && roomCode) socket.emit('master:skipToBreak', { roomCode });
+            if(socket && roomCode) socket.emit('master:skipToBreak', { roomCode, hostToken });
         };
         window.masterEndBreak = () => {
-            if(socket && roomCode) socket.emit('master:endBreak', { roomCode });
+            if(socket && roomCode) socket.emit('master:endBreak', { roomCode, hostToken });
         };
         window.masterExtendBreak = () => {
-            if(socket && roomCode) socket.emit('master:extendBreak', { roomCode });
+            if(socket && roomCode) socket.emit('master:extendBreak', { roomCode, hostToken });
         };
         window.masterEndRound = () => {
             if(confirm('Are you sure you want to end the match now and force jump to final standings?')) {
-                if(socket && roomCode) socket.emit('master:endRound', { roomCode });
+                if(socket && roomCode) socket.emit('master:endRound', { roomCode, hostToken });
             }
         };
 
@@ -736,18 +763,54 @@
 
         // SOCKET EVENT LISTENERS
         if(socket) {
-            socket.on('connect', () => { mySocketId = socket.id; });
+            socket.on('connect', () => {
+                mySocketId = socket.id;
+                attemptMasterReconnect();
+            });
 
             socket.on('roomCreated', (data) => {
                 roomCode = data.roomCode;
                 isHost = true;
                 isMaster = data.isMaster;
                 gameMode = data.mode;
+                hostToken = data.hostToken || null;
+                if (hostToken) {
+                    sessionStorage.setItem('mockstock_master_session', JSON.stringify({
+                        roomCode,
+                        isHost: true,
+                        hostToken,
+                        mode: gameMode
+                    }));
+                }
                 document.getElementById('displayRoomCode').textContent = roomCode;
                 document.getElementById('waitingModeBadge').textContent = gameMode === 'match' ? 'Match Mode (40m Tournament — Master Role)' : 'Standard Mode';
                 document.getElementById('btnStartGame').classList.remove('hidden');
                 document.getElementById('waitMessage').classList.add('hidden');
                 showView('waitingRoom');
+            });
+
+            socket.on('masterRestored', (data) => {
+                roomCode = data.roomCode;
+                isHost = true;
+                isMaster = data.isMaster;
+                gameMode = data.mode;
+                hostToken = data.hostToken || hostToken;
+
+                if (data.gameStarted) {
+                    if (isMaster) {
+                        showView('masterPanel');
+                        document.getElementById('masterRoomCode').textContent = roomCode;
+                    } else {
+                        showView('arena');
+                        document.getElementById('arenaRoomCode').textContent = `Code: ${roomCode}`;
+                    }
+                } else {
+                    showView('waitingRoom');
+                    document.getElementById('displayRoomCode').textContent = roomCode;
+                    document.getElementById('btnStartGame').classList.remove('hidden');
+                    document.getElementById('waitMessage').classList.add('hidden');
+                }
+                showToast('Master Host session restored!', 'success');
             });
 
             socket.on('roomJoined', (data) => {

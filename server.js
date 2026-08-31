@@ -584,6 +584,19 @@ function endGame(roomCode, room) {
   setTimeout(() => { rooms.delete(roomCode); }, 60000);
 }
 
+// ─── Host Verification Helper ────────────────────────────────────────────────
+function verifyHost(socket, room, hostToken) {
+  if (!room) return false;
+  const token = hostToken || socket.hostToken;
+  if (socket.id === room.hostId) return true;
+  if (token && room.hostToken && token === room.hostToken) {
+    room.hostId = socket.id; // Re-bind hostId to current socket
+    socket.hostToken = token;
+    return true;
+  }
+  return false;
+}
+
 // ─── Socket Handlers ────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log(`🔌 Connected: ${socket.id}`);
@@ -592,7 +605,11 @@ io.on('connection', (socket) => {
     let roomCode;
     do { roomCode = generateRoomCode(); } while (rooms.has(roomCode));
 
+    const hostToken = 'host_' + Math.random().toString(36).substring(2) + '_' + Date.now();
     const room = createRoomState(socket.id, playerName, durationMinutes);
+    room.hostToken = hostToken;
+    socket.hostToken = hostToken;
+
     addPlayer(room, socket.id, playerName);
     rooms.set(roomCode, room);
 
@@ -603,10 +620,46 @@ io.on('connection', (socket) => {
       roomCode,
       mode: room.mode,
       isMaster: room.mode === 'match' && socket.id === room.hostId,
+      hostToken,
       durationMinutes: room.durationMinutes,
     });
     io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
-    console.log(`🏠 Room ${roomCode} created by ${playerName} (Mode: ${room.mode})`);
+    console.log(`🏠 Room ${roomCode} created by ${playerName} (Mode: ${room.mode}, Token: ${hostToken})`);
+  });
+
+  socket.on('master:reconnect', ({ roomCode, hostToken }) => {
+    const room = rooms.get(roomCode);
+    if (!room) {
+      return socket.emit('error', { message: 'Room not found.' });
+    }
+
+    if (verifyHost(socket, room, hostToken)) {
+      socket.join(roomCode);
+      socket.roomCode = roomCode;
+      socket.hostToken = hostToken;
+
+      const isMaster = room.mode === 'match';
+      socket.emit('masterRestored', {
+        roomCode,
+        mode: room.mode,
+        isMaster,
+        hostToken,
+        gameStarted: room.gameStarted,
+        phase: room.phase,
+        isPaused: room.isPaused,
+        isMarketFrozen: room.isMarketFrozen,
+        remaining: room.phaseTimer,
+      });
+
+      if (room.gameStarted) {
+        broadcastPrices(roomCode, room);
+        broadcastLeaderboard(roomCode, room);
+      }
+
+      console.log(`👑 Master host session restored for room ${roomCode} (socket: ${socket.id})`);
+    } else {
+      socket.emit('error', { message: 'Master re-authentication failed.' });
+    }
   });
 
   socket.on('joinRoom', ({ roomCode, playerName }) => {
@@ -627,16 +680,16 @@ io.on('connection', (socket) => {
     socket.emit('roomJoined', {
       roomCode,
       mode: room.mode,
-      isMaster: room.mode === 'match' && socket.id === room.hostId,
+      isMaster: room.mode === 'match' && verifyHost(socket, room),
     });
     io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
     console.log(`👤 ${playerName} joined ${roomCode}`);
   });
 
-  socket.on('startGame', ({ roomCode }) => {
+  socket.on('startGame', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room) return;
-    if (socket.id !== room.hostId) {
+    if (!verifyHost(socket, room, hostToken)) {
       socket.emit('error', { message: 'Only the host can start the game.' });
       return;
     }
@@ -647,10 +700,10 @@ io.on('connection', (socket) => {
   });
 
   // Master Control Suite Handlers
-  socket.on('master:togglePause', ({ roomCode }) => {
+  socket.on('master:togglePause', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can pause/resume.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can pause/resume.' });
 
     room.isPaused = !room.isPaused;
     io.to(roomCode).emit('matchStateUpdated', {
@@ -662,10 +715,10 @@ io.on('connection', (socket) => {
     console.log(`⏯️ Room ${roomCode} paused: ${room.isPaused}`);
   });
 
-  socket.on('master:skipToBreak', ({ roomCode }) => {
+  socket.on('master:skipToBreak', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can skip round.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can skip round.' });
     
     if (room.phase === 'round1') {
       room.phase = 'break1';
@@ -694,10 +747,10 @@ io.on('connection', (socket) => {
     console.log(`⏩ Room ${roomCode} skipped to ${room.phase}`);
   });
 
-  socket.on('master:endBreak', ({ roomCode }) => {
+  socket.on('master:endBreak', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can end break.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can end break.' });
     if (!room.phase.startsWith('break')) {
       return socket.emit('error', { message: 'Can only end break early during a break phase!' });
     }
@@ -705,10 +758,10 @@ io.on('connection', (socket) => {
     advanceMatchPhase(roomCode, room);
   });
 
-  socket.on('master:extendBreak', ({ roomCode }) => {
+  socket.on('master:extendBreak', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted || room.mode !== 'match') return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can extend break.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can extend break.' });
     if (!room.phase.startsWith('break')) {
       return socket.emit('error', { message: 'Can only extend break during a break phase!' });
     }
@@ -726,10 +779,10 @@ io.on('connection', (socket) => {
     console.log(`⌛ Room ${roomCode} break extended +300s`);
   });
 
-  socket.on('master:extendRound', ({ roomCode }) => {
+  socket.on('master:extendRound', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can extend the round.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can extend the round.' });
 
     const isRoundActive = (room.mode === 'match' && room.phase.startsWith('round') && !room.isMarketFrozen) || (room.mode === 'standard' && room.timer > 0);
     if (!isRoundActive) {
@@ -755,10 +808,10 @@ io.on('connection', (socket) => {
     console.log(`⌛ Room ${roomCode} round extended +300s by Master`);
   });
 
-  socket.on('master:decreaseRound', ({ roomCode }) => {
+  socket.on('master:decreaseRound', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can decrease round time.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can decrease round time.' });
 
     const isRoundActive = (room.mode === 'match' && room.phase.startsWith('round') && !room.isMarketFrozen) || (room.mode === 'standard' && room.timer > 0);
     if (!isRoundActive) {
@@ -802,10 +855,10 @@ io.on('connection', (socket) => {
     console.log(`⌛ Room ${roomCode} round decreased -60s by Master`);
   });
 
-  socket.on('master:skipRound', ({ roomCode }) => {
+  socket.on('master:skipRound', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can skip/end the round.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can skip/end the round.' });
 
     const isRoundActive = (room.mode === 'match' && room.phase.startsWith('round') && !room.isMarketFrozen) || (room.mode === 'standard' && room.timer > 0);
     if (!isRoundActive) {
@@ -828,10 +881,10 @@ io.on('connection', (socket) => {
     console.log(`⏩ Room ${roomCode} round skipped/ended by Master`);
   });
 
-  socket.on('master:endRound', ({ roomCode }) => {
+  socket.on('master:endRound', ({ roomCode, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || !room.gameStarted) return;
-    if (socket.id !== room.hostId) return socket.emit('error', { message: 'Only the host can end match.' });
+    if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can end match.' });
 
     console.log(`🛑 Match ${roomCode} terminated early by Master.`);
     room.phase = 'finished';
@@ -839,10 +892,10 @@ io.on('connection', (socket) => {
   });
 
   // Master Price Manipulation (During Breaks OR Paused in Match Mode)
-  const handleMasterPriceUpdate = ({ roomCode, ticker, newPrice }) => {
+  const handleMasterPriceUpdate = ({ roomCode, ticker, newPrice, hostToken }) => {
     const room = rooms.get(roomCode);
     if (!room || room.mode !== 'match') return;
-    if (socket.id !== room.hostId) {
+    if (!verifyHost(socket, room, hostToken)) {
       socket.emit('error', { message: 'Only the Master can update stock prices.' });
       return;
     }
