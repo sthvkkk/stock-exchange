@@ -641,6 +641,13 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('room:getLobbyState', (data) => {
+    const targetRoomCode = (data && data.roomCode) || socket.roomCode;
+    const room = rooms.get(targetRoomCode);
+    if (!room) return;
+    socket.emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
+  });
+
   socket.on('room:getLatestState', (data) => {
     const targetRoomCode = (data && data.roomCode) || socket.roomCode;
     const room = rooms.get(targetRoomCode);
@@ -700,7 +707,7 @@ io.on('connection', (socket) => {
       hostToken,
       durationMinutes: room.durationMinutes,
     });
-    io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
+    io.to(roomCode).emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
     console.log(`🏠 Room ${roomCode} created by ${playerName} (Mode: ${room.mode}, Token: ${hostToken})`);
   });
 
@@ -759,7 +766,7 @@ io.on('connection', (socket) => {
       mode: room.mode,
       isMaster: room.mode === 'match' && verifyHost(socket, room),
     });
-    io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
+    io.to(roomCode).emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
     console.log(`👤 ${playerName} joined ${roomCode}`);
   });
 
@@ -1216,7 +1223,7 @@ io.on('connection', (socket) => {
     if (!room) return;
 
     room.players.delete(socket.id);
-    io.to(roomCode).emit('playerJoined', { players: getPlayerList(room) });
+    io.to(roomCode).emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
 
     if (room.players.size === 0 && socket.id === room.hostId) {
       clearInterval(room.tickInterval);

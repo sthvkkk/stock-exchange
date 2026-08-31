@@ -414,6 +414,7 @@
                 if (roomCode && socket && socket.connected) {
                     socket.emit('room:syncTime', { roomCode });
                     socket.emit('room:getLatestState', { roomCode });
+                    socket.emit('room:getLobbyState', { roomCode });
                 }
                 attemptMasterReconnect();
             }
@@ -423,6 +424,7 @@
             if (roomCode && socket && socket.connected) {
                 socket.emit('room:syncTime', { roomCode });
                 socket.emit('room:getLatestState', { roomCode });
+                socket.emit('room:getLobbyState', { roomCode });
             }
             attemptMasterReconnect();
         });
@@ -864,6 +866,9 @@
         if(socket) {
             socket.on('connect', () => {
                 mySocketId = socket.id;
+                if (roomCode) {
+                    socket.emit('room:getLobbyState', { roomCode });
+                }
                 attemptMasterReconnect();
             });
 
@@ -924,10 +929,10 @@
                 showView('waitingRoom');
             });
 
-            socket.on('playerJoined', (data) => {
+            socket.on('room:playerListUpdate', (data) => {
                 const ul = document.getElementById('playerList');
                 ul.innerHTML = '';
-                document.getElementById('playerCount').textContent = `${data.players.length} connected`;
+                document.getElementById('playerCount').textContent = `${data.count || data.players.length} connected`;
                 data.players.forEach(p => {
                     const li = document.createElement('li');
                     li.className = "bg-slate-950 border border-slate-800/80 px-4 py-2 rounded-xl flex items-center justify-between";
