@@ -694,7 +694,7 @@ io.on('connection', (socket) => {
       mode: room.mode,
       isMaster: room.mode === 'match' && socket.id === room.hostId,
       hostToken,
-      roundEndTime: room.roundEndTime || (Date.now() + 10 * 60 * 1000)
+      roundEndTime: room.roundEndTime || (Date.now() + 10 * 60 * 1000),
       durationMinutes: room.durationMinutes,
     });
     io.to(roomCode).emit('room:playerListUpdate', { players: getPlayerList(room), count: room.players.size });
