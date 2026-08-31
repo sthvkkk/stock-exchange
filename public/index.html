@@ -267,8 +267,20 @@
                 <button id="btnMasterExtendBreak" onclick="masterExtendBreak()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
                     <span>Extend Break (+5 Mins)</span>
                 </button>
-                <button id="btnMasterEndRound" onclick="masterEndRound()" class="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation">
-                    <span>End Match Now</span>
+        <!-- Master Fund Injection Section -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+                <span class="text-xs uppercase font-bold text-emerald-400 tracking-wider">Account Liquidity Management</span>
+                <h3 class="text-lg font-bold text-white uppercase">Master Fund Injection</h3>
+                <p class="text-xs text-slate-400">Inject cash directly into any player's available cash balance</p>
+            </div>
+            <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                <select id="masterPlayerSelect" class="w-full sm:w-48 bg-slate-950 border border-slate-800 text-white text-xs px-3 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500">
+                    <option value="">Select Player...</option>
+                </select>
+                <input type="number" step="1000" id="masterFundAmount" placeholder="Amount (e.g. 500000)" class="w-full sm:w-44 bg-slate-950 border border-slate-800 text-white text-xs px-3 py-2.5 rounded-xl focus:outline-none focus:border-emerald-500">
+                <button id="btnMasterAddFunds" onclick="masterAddFunds()" class="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center touch-manipulation whitespace-nowrap">
+                    <span>Add Funds</span>
                 </button>
             </div>
         </div>
@@ -699,6 +711,43 @@
             }
         };
 
+        function updateMasterPlayerDropdown(players) {
+            const select = document.getElementById('masterPlayerSelect');
+            if (!select || !Array.isArray(players)) return;
+            const currentVal = select.value;
+            select.innerHTML = '<option value="">Select Player...</option>';
+            players.forEach(p => {
+                const option = document.createElement('option');
+                option.value = p.id;
+                option.textContent = p.name;
+                select.appendChild(option);
+            });
+            if (currentVal) select.value = currentVal;
+        }
+
+        window.masterAddFunds = () => {
+            const code = getActiveRoomCode();
+            const select = document.getElementById('masterPlayerSelect');
+            const amountInput = document.getElementById('masterFundAmount');
+            if (!select || !amountInput) return;
+            
+            const targetSocketId = select.value;
+            const amount = parseFloat(amountInput.value);
+            
+            if (!targetSocketId) return showToast('Please select a player.');
+            if (isNaN(amount) || amount <= 0) return showToast('Please enter a valid positive amount.');
+            
+            if (socket && code) {
+                socket.emit('master:addFunds', {
+                    roomCode: code,
+                    targetSocketId,
+                    amount,
+                    hostToken
+                });
+                amountInput.value = '';
+            }
+        };
+
         // RENDER PORTFOLIO POSITIONS TABLE
         function renderPortfolioTable(details) {
             const tbody = document.getElementById('portfolioTableBody');
@@ -779,6 +828,10 @@
             
             if(tbody) tbody.innerHTML = '';
             if(masterTbody) masterTbody.innerHTML = '';
+
+            if (Array.isArray(board)) {
+                updateMasterPlayerDropdown(board);
+            }
 
             board.forEach(p => {
                 const tr = document.createElement('tr');
@@ -862,6 +915,7 @@
                 const ul = document.getElementById('playerList');
                 ul.innerHTML = '';
                 document.getElementById('playerCount').textContent = `${data.players.length} connected`;
+                updateMasterPlayerDropdown(data.players);
                 data.players.forEach(p => {
                     const li = document.createElement('li');
                     li.className = "bg-slate-950 border border-slate-800/80 px-4 py-2 rounded-xl flex items-center justify-between";

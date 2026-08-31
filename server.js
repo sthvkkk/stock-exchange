@@ -950,6 +950,39 @@ io.on('connection', (socket) => {
   socket.on('master:updatePrice', handleMasterPriceUpdate);
   socket.on('master:setPrice', handleMasterPriceUpdate);
 
+  // Master Fund Injection Handler
+  socket.on('master:addFunds', ({ roomCode, targetSocketId, amount, hostToken }) => {
+    const targetRoomCode = roomCode || socket.roomCode;
+    const room = rooms.get(targetRoomCode);
+    if (!room) return socket.emit('error', { message: 'Room not found.' });
+
+    if (!verifyHost(socket, room, hostToken)) {
+      return socket.emit('error', { message: 'Only the Master can inject funds.' });
+    }
+
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return socket.emit('masterActionResult', { success: false, message: 'Invalid injection amount.' });
+    }
+
+    const targetPlayer = room.players.get(targetSocketId);
+    if (!targetPlayer) {
+      return socket.emit('masterActionResult', { success: false, message: 'Player not found in room.' });
+    }
+
+    targetPlayer.cash = Math.round((targetPlayer.cash + parsedAmount) * 100) / 100;
+    
+    broadcastPortfolios(targetRoomCode, room);
+    broadcastLeaderboard(targetRoomCode, room);
+
+    socket.emit('masterActionResult', {
+      success: true,
+      message: `Injected ₹${parsedAmount.toLocaleString('en-IN')} cash to ${targetPlayer.name}`
+    });
+
+    console.log(`💰 Master injected ₹${parsedAmount} to ${targetPlayer.name} in room ${targetRoomCode}`);
+  });
+
   // Trade Execution (Separate LONG and SHORT tracking per ticker)
   socket.on('executeTrade', ({ roomCode, ticker, action, quantity }) => {
     const room = rooms.get(roomCode);
