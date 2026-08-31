@@ -411,11 +411,17 @@
 
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible') {
+                if (roomCode && socket && socket.connected) {
+                    socket.emit('room:syncTime', { roomCode });
+                }
                 attemptMasterReconnect();
             }
         });
 
         window.addEventListener('focus', () => {
+            if (roomCode && socket && socket.connected) {
+                socket.emit('room:syncTime', { roomCode });
+            }
             attemptMasterReconnect();
         });
 
@@ -1049,21 +1055,40 @@
                 if(data.message) showToast(data.message, data.success ? 'success' : 'error');
             });
 
-            socket.on('timerUpdate', (data) => {
-                isMarketFrozen = data.isMarketFrozen || false;
-                isPaused = data.isPaused || false;
-                if(data.phase) currentPhase = data.phase;
-
-                if (currentPhase === 'round3') {
-                    const banner = document.getElementById('newsBanner');
-                    if (banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
+            // --- WEB WORKER BACKGROUND TIMER ---
+            const workerCode = `
+                let tickInterval;
+                self.onmessage = function(e) {
+                    if (e.data === 'start') {
+                        if (tickInterval) clearInterval(tickInterval);
+                        tickInterval = setInterval(() => {
+                            self.postMessage('tick');
+                        }, 1000);
+                    } else if (e.data === 'stop') {
+                        if (tickInterval) clearInterval(tickInterval);
+                    }
+                };
+            `;
+            const blob = new Blob([workerCode], {type: 'application/javascript'});
+            const tickWorker = new Worker(URL.createObjectURL(blob));
+            
+            tickWorker.onmessage = () => {
+                if (roomCode && socket && socket.connected) {
+                    socket.emit('room:syncTime', { roomCode });
+                    if (window.currentEndTime && !isPaused) {
+                        const remaining = Math.max(0, Math.ceil((window.currentEndTime - Date.now()) / 1000));
+                        updateTimerUI(remaining);
+                    }
                 }
+            };
+            tickWorker.postMessage('start');
 
-                const m = Math.floor(data.remaining / 60).toString().padStart(2, '0');
-                const s = (data.remaining % 60).toString().padStart(2, '0');
+            function updateTimerUI(remaining) {
+                const m = Math.floor(remaining / 60).toString().padStart(2, '0');
+                const s = (remaining % 60).toString().padStart(2, '0');
 
-                const isRoundActive = (data.phase && data.phase.startsWith('round') && !isMarketFrozen && data.phase !== 'finished') || (data.phase === 'standard' && !isMarketFrozen && data.remaining > 0);
-                const canDecrease = isRoundActive && data.remaining >= 60;
+                const isRoundActive = (currentPhase && currentPhase.startsWith('round') && !isMarketFrozen && currentPhase !== 'finished') || (currentPhase === 'standard' && !isMarketFrozen && remaining > 0);
+                const canDecrease = isRoundActive && remaining >= 60;
 
                 const btnExtendRound = document.getElementById('btnMasterExtendRound');
                 const btnDecreaseRound = document.getElementById('btnMasterDecreaseRound');
@@ -1087,7 +1112,7 @@
 
                 if(isMaster) {
                     document.getElementById('masterTimerDisplay').textContent = `${m}:${s}`;
-                    document.getElementById('masterPhaseLabel').textContent = isPaused ? 'PAUSED' : (data.phase ? data.phase.toUpperCase() : 'MATCH');
+                    document.getElementById('masterPhaseLabel').textContent = isPaused ? 'PAUSED' : (currentPhase ? currentPhase.toUpperCase() : 'MATCH');
                     const badge = document.getElementById('masterFreezeBadge');
                     if(isPaused) {
                         badge.textContent = 'MATCH PAUSED';
@@ -1099,14 +1124,30 @@
                         badge.textContent = 'MARKET ACTIVE';
                         badge.className = 'px-3 py-1 text-xs font-bold rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800';
                     }
-                    renderStocks(Object.values(currentStocks));
+                    if (currentStocks) renderStocks(Object.values(currentStocks));
                 } else {
                     document.getElementById('timerDisplay').textContent = `${m}:${s}`;
-                    if(data.phase && data.phase !== 'standard') {
+                    if(currentPhase && currentPhase !== 'standard') {
                         const badge = document.getElementById('arenaPhaseBadge');
-                        badge.textContent = isPaused ? `${data.phase.toUpperCase()} (PAUSED)` : isMarketFrozen ? `${data.phase.toUpperCase()} (FROZEN)` : data.phase.toUpperCase();
+                        if (badge) {
+                            badge.textContent = isPaused ? `${currentPhase.toUpperCase()} (PAUSED)` : isMarketFrozen ? `${currentPhase.toUpperCase()} (FROZEN)` : currentPhase.toUpperCase();
+                        }
                     }
                 }
+            }
+
+            socket.on('timerUpdate', (data) => {
+                isMarketFrozen = data.isMarketFrozen || false;
+                isPaused = data.isPaused || false;
+                if(data.phase) currentPhase = data.phase;
+                if(data.endTime) window.currentEndTime = data.endTime;
+
+                if (currentPhase === 'round3') {
+                    const banner = document.getElementById('newsBanner');
+                    if (banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
+                }
+
+                updateTimerUI(data.remaining);
             });
 
             socket.on('matchStateUpdated', (data) => {
