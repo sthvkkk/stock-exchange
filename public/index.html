@@ -319,7 +319,7 @@
     </div>
 
     <!-- TRADE MODAL -->
-    <div id="tradeModal" class="hidden fixed inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex justify-end">
+    <div id="tradeModal" class="hidden fixed inset-0 z-[9999] bg-slate-950/80 backdrop-blur-sm flex justify-end" style="z-index: 9999;">
         <div class="h-full w-full sm:w-96 bg-[#0b0f17] shadow-2xl border-l border-slate-800 flex flex-col p-6 overflow-y-auto">
             <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
                 <div>
@@ -564,6 +564,19 @@
             const grid = document.getElementById('stockGrid');
             const masterInputs = document.getElementById('masterStockInputs');
 
+            if (grid && !grid.dataset.delegated) {
+                grid.dataset.delegated = "true";
+                grid.addEventListener('click', (e) => {
+                    const card = e.target.closest('[data-ticker]');
+                    if (card) {
+                        const ticker = card.getAttribute('data-ticker');
+                        if (ticker) {
+                            openTradeModal(ticker);
+                        }
+                    }
+                });
+            }
+
             stocksArray.forEach(stock => {
                 currentStocks[stock.ticker] = stock;
                 let card = document.getElementById(`stock-${stock.ticker}`);
@@ -585,10 +598,12 @@
                     }
                 }
 
+                card.setAttribute('data-ticker', stock.ticker);
+
                 card.onclick = () => {
                     if(isMaster) return;
                     if(isMarketFrozen) return showToast('Market is frozen during breaks!');
-                    openTrade(stock.ticker);
+                    openTradeModal(stock.ticker);
                 };
 
                 const isPositive = stock.changePercent > 0;
@@ -828,7 +843,7 @@
             if(socket && roomCode) socket.emit('closePosition', { roomCode, ticker, type });
         };
 
-        window.openTrade = (ticker) => {
+        function openTradeModal(ticker) {
             if(isMaster) return;
             if(isMarketFrozen) return showToast('Market is frozen during breaks!');
             selectedTickerForTrade = ticker;
@@ -836,9 +851,15 @@
             document.getElementById('modalTicker').textContent = ticker;
             document.getElementById('modalError').classList.add('hidden');
             updateTradeModalVals();
-            modals.trade.classList.remove('hidden');
-            modals.trade.style.display = 'flex';
-        };
+            const modal = document.getElementById('tradeModal');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.style.display = 'flex';
+                modal.style.zIndex = '9999';
+            }
+        }
+        window.openTradeModal = openTradeModal;
+        window.openTrade = openTradeModal;
 
         function renderLeaderboard(board) {
             const tbody = document.getElementById('leaderboardBody');
