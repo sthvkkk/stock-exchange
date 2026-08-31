@@ -448,8 +448,12 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
   if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
 
   room.stocks.forEach(stock => {
-    const baseR2Price = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
+    let baseR2Price = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
     if (!baseR2Price || baseR2Price <= 0) return;
+
+    if (typeof stock.r3BaselineNI !== 'number') {
+      stock.r3BaselineNI = 0;
+    }
 
     if (updateTickNoise || typeof stock.r3TickNoisePct !== 'number') {
       // Small random organic tick fluctuation between -1.5% and +1.5% per 1-second tick
@@ -468,9 +472,11 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       }
     });
 
-    const netInvestment = (totalLongQty - totalShortQty) * baseR2Price;
-    // NI Demand % Change = (NI / 1,000,000) * 2%  (1% shift per ₹5,00,000 NI)
-    const niChangePct = (netInvestment / 1000000) * 2;
+    const currentNI = (totalLongQty - totalShortQty) * baseR2Price;
+    const deltaNI = currentNI - stock.r3BaselineNI;
+
+    // NI Demand % Change = (deltaNI / 1,000,000) * 2%  (1% shift per ₹5,00,000 NI delta)
+    const niChangePct = (deltaNI / 1000000) * 2;
 
     // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise %
     const totalUncappedPct = niChangePct + (stock.r3TickNoisePct || 0);
@@ -478,32 +484,32 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     let finalChangePct = totalUncappedPct;
 
     if (totalUncappedPct >= 10.0) {
-      // Over-Surge Threshold (>= +10%): Crash to EXACTLY -30%
-      finalChangePct = -30.0;
-      if (!stock.circuitBreakerTriggered) {
-        stock.circuitBreakerTriggered = true;
-        stock.shortSqueezeTriggered = false;
-        console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalUncappedPct.toFixed(2)}% (>= +10%) -> Crashed -30%!`);
-        io.to(roomCode).emit('newsFlash', {
-          ticker: stock.ticker,
-          headline: `CIRCUIT BREAKER TRIGGERED: ${stock.ticker} buying surge exceeded +10% threshold! Market crashed -30%!`,
-        });
-      }
+      // Over-Surge Circuit Breaker Threshold (>= +10%): Permanently crash base reference by -30%
+      stock.round2ClosePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
+      stock.round2ClosingPrice = stock.round2ClosePrice;
+      stock.r3BaselineNI = currentNI; // Lock baseline NI to crash moment
+      baseR2Price = stock.round2ClosePrice;
+      finalChangePct = stock.r3TickNoisePct || 0; // Price starts at new crashed base + tick noise
+
+      console.log(`⚡ CIRCUIT BREAKER: ${stock.ticker} total surge = ${totalUncappedPct.toFixed(2)}% (>= +10%) -> Permanently crashed base to ₹${baseR2Price}!`);
+      io.to(roomCode).emit('newsFlash', {
+        ticker: stock.ticker,
+        headline: `CIRCUIT BREAKER TRIGGERED: ${stock.ticker} buying surge exceeded +10% threshold! Market crashed -30%!`,
+      });
+
     } else if (totalUncappedPct <= -10.0) {
-      // Short Squeeze Threshold (<= -10%): Rally to EXACTLY +30%
-      finalChangePct = 30.0;
-      if (!stock.shortSqueezeTriggered) {
-        stock.shortSqueezeTriggered = true;
-        stock.circuitBreakerTriggered = false;
-        console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalUncappedPct.toFixed(2)}% (<= -10%) -> Squeezed +30%!`);
-        io.to(roomCode).emit('newsFlash', {
-          ticker: stock.ticker,
-          headline: `SHORT SQUEEZE TRIGGERED: ${stock.ticker} short selling exceeded -10% threshold! Squeeze rally jumped +30%!`,
-        });
-      }
-    } else {
-      stock.circuitBreakerTriggered = false;
-      stock.shortSqueezeTriggered = false;
+      // Short Squeeze Threshold (<= -10%): Permanently jump base reference by +30%
+      stock.round2ClosePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
+      stock.round2ClosingPrice = stock.round2ClosePrice;
+      stock.r3BaselineNI = currentNI; // Lock baseline NI to squeeze moment
+      baseR2Price = stock.round2ClosePrice;
+      finalChangePct = stock.r3TickNoisePct || 0; // Price starts at new squeezed base + tick noise
+
+      console.log(`🚀 SHORT SQUEEZE: ${stock.ticker} total drop = ${totalUncappedPct.toFixed(2)}% (<= -10%) -> Permanently squeezed base to ₹${baseR2Price}!`);
+      io.to(roomCode).emit('newsFlash', {
+        ticker: stock.ticker,
+        headline: `SHORT SQUEEZE TRIGGERED: ${stock.ticker} short selling exceeded -10% threshold! Squeeze rally jumped +30%!`,
+      });
     }
 
     const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
@@ -536,6 +542,7 @@ function advanceMatchPhase(roomCode, room) {
     room.stocks.forEach(s => {
       s.round2ClosePrice = s.price;
       s.round2ClosingPrice = s.price;
+      s.r3BaselineNI = 0;
     });
   } else if (room.phase === 'break2') {
     room.phase = 'round3';
@@ -546,6 +553,7 @@ function advanceMatchPhase(roomCode, room) {
     room.stocks.forEach(s => {
       if (!s.round2ClosePrice) s.round2ClosePrice = s.price;
       if (!s.round2ClosingPrice) s.round2ClosingPrice = s.price;
+      if (typeof s.r3BaselineNI !== 'number') s.r3BaselineNI = 0;
     });
 
     // Initial recalculation for Round 3 start
