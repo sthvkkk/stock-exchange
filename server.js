@@ -166,23 +166,27 @@ function broadcastPrices(roomCode, room) {
 
 // ─── Leaderboard & Portfolios ────────────────────────────────────────────────
 function calculateNetWorth(player, stocks) {
-  let stockValue = 0;
+  let longStockValue = 0;
+  let shortCollateral = 0;
+  let totalShortPnL = 0;
   let portfolioDetails = {};
 
   stocks.forEach(s => {
     const item = player.portfolio[s.ticker] || { longQty: 0, longAvgPrice: 0, shortQty: 0, shortAvgPrice: 0 };
-    const longQty = item.longQty || (item.qty > 0 ? item.qty : 0);
-    const longAvgPrice = item.longAvgPrice || (item.qty > 0 ? item.avgPrice : 0);
-    const shortQty = item.shortQty || (item.qty < 0 ? Math.abs(item.qty) : 0);
-    const shortAvgPrice = item.shortAvgPrice || (item.qty < 0 ? item.avgPrice : 0);
+    const longQty = item.longQty || 0;
+    const longAvgPrice = item.longAvgPrice || 0;
+    const shortQty = item.shortQty || 0;
+    const shortAvgPrice = item.shortAvgPrice || 0;
 
     const longValue = longQty * s.price;
-    const shortLiability = shortQty * s.price;
-
-    stockValue += (longValue - shortLiability);
+    const shortMargin = shortQty * shortAvgPrice;
 
     const longPnL = longQty > 0 ? (s.price - longAvgPrice) * longQty : 0;
     const shortPnL = shortQty > 0 ? (shortAvgPrice - s.price) * shortQty : 0;
+
+    longStockValue += longValue;
+    shortCollateral += shortMargin;
+    totalShortPnL += shortPnL;
 
     portfolioDetails[s.ticker] = {
       longQty,
@@ -198,6 +202,7 @@ function calculateNetWorth(player, stocks) {
     };
   });
 
+  const stockValue = longStockValue + shortCollateral + totalShortPnL;
   const netWorth = player.cash + stockValue;
 
   return {
@@ -777,8 +782,16 @@ io.on('connection', (socket) => {
         });
 
       } else if (room.mode === 'match') {
-        // In Match mode: SELL opens/adds to SHORT position without touching LONG position!
-        player.cash += totalCost; // Short sale proceeds
+        // In Match mode: SELL reserves position value as margin collateral (no cash inflation!)
+        if (player.cash < totalCost) {
+          socket.emit('tradeResult', {
+            success: false,
+            message: `Insufficient available cash for margin collateral. Need ₹${totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
+          });
+          return;
+        }
+
+        player.cash -= totalCost; // Reserve margin collateral from available cash
         const newShortQty = (item.shortQty || 0) + qty;
         const oldShortVal = (item.shortQty || 0) * (item.shortAvgPrice || 0);
         item.shortAvgPrice = (oldShortVal + totalCost) / newShortQty;
@@ -844,15 +857,19 @@ io.on('connection', (socket) => {
         return;
       }
       const qtyToClose = item.shortQty;
-      const cost = stock.price * qtyToClose;
-      if (player.cash < cost) {
-        socket.emit('tradeResult', { success: false, message: `Insufficient cash (₹${cost.toFixed(2)}) to close SHORT position.` });
-        return;
-      }
-      player.cash -= cost;
+      const collateralReleased = qtyToClose * item.shortAvgPrice;
+      const realizedPnL = (item.shortAvgPrice - stock.price) * qtyToClose;
+      const cashReturned = collateralReleased + realizedPnL;
+
+      player.cash = Math.max(0, player.cash + cashReturned);
       item.shortQty = 0;
       item.shortAvgPrice = 0;
-      socket.emit('tradeResult', { success: true, message: `Closed SHORT position in ${ticker} (${qtyToClose} shares)` });
+
+      const pnlStr = realizedPnL >= 0 ? `+₹${realizedPnL.toFixed(2)}` : `-₹${Math.abs(realizedPnL).toFixed(2)}`;
+      socket.emit('tradeResult', {
+        success: true,
+        message: `Closed SHORT position in ${ticker} (${qtyToClose} shares, Realized P&L: ${pnlStr})`
+      });
     }
 
     broadcastPortfolios(roomCode, room);
