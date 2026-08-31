@@ -965,7 +965,8 @@ io.on('connection', (socket) => {
 
   // Trade Execution (Separate LONG and SHORT tracking per ticker)
   const handleExecuteTrade = ({ roomCode, ticker, action, type, quantity }) => {
-    const room = rooms.get(roomCode);
+    const targetRoomCode = roomCode || socket.roomCode;
+    const room = rooms.get(targetRoomCode);
     if (!room || !room.gameStarted) {
       socket.emit('tradeResult', { success: false, message: 'Game not active.' });
       return;
