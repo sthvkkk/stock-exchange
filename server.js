@@ -507,14 +507,14 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     // Total Uncapped % Change = NI Demand % Change + 1s Organic Tick Noise % (-0.95% to +0.95%)
     const rawTotalPercentChange = uncappedDemandPercent + noisePercent;
 
-    // Enforce Strict 2-Decimal Precision Check
-    const totalPercentChange = Math.round(rawTotalPercentChange * 100) / 100;
+    // Enforce Strict 2-Decimal Precision Check for Total Displayed Price Shift
+    const totalShift = Math.round(rawTotalPercentChange * 100) / 100;
 
-    let finalChangePct = totalPercentChange;
+    let finalChangePct = totalShift;
 
-    if (totalPercentChange >= 10.0) {
+    if (totalShift >= 10.0) {
       // Over-Surge Circuit Breaker Threshold (>= +10.0%): Permanently crash base reference by -30% (Stealth Execution)
-      stock.circuitBreakerTriggered = 'CRASH';
+      stock.circuitBreakerTriggered = true;
       stock.crashedBasePrice = Math.round((baseR2Price * 0.70) * 100) / 100;
       stock.round2ClosePrice = stock.crashedBasePrice;
       stock.round2ClosingPrice = stock.crashedBasePrice;
@@ -522,11 +522,11 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       baseR2Price = stock.crashedBasePrice;
       finalChangePct = noisePercent; // Price starts at new crashed base + tick noise
 
-      console.log(`⚡ STICKY CRASH: ${stock.ticker} total surge = ${totalPercentChange.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
+      console.log(`⚡ STICKY CRASH: ${stock.ticker} total surge = ${totalShift.toFixed(2)}% (>= +10.0%) -> Permanently crashed base to ₹${baseR2Price}! (Silent)`);
 
-    } else if (totalPercentChange <= -10.0) {
+    } else if (totalShift <= -10.0) {
       // Short Squeeze Threshold (<= -10.0%): Permanently jump base reference by +30% (Stealth Execution)
-      stock.circuitBreakerTriggered = 'SQUEEZE';
+      stock.circuitBreakerTriggered = true;
       stock.crashedBasePrice = Math.round((baseR2Price * 1.30) * 100) / 100;
       stock.round2ClosePrice = stock.crashedBasePrice;
       stock.round2ClosingPrice = stock.crashedBasePrice;
@@ -534,7 +534,7 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       baseR2Price = stock.crashedBasePrice;
       finalChangePct = noisePercent; // Price starts at new squeezed base + tick noise
 
-      console.log(`🚀 STICKY SQUEEZE: ${stock.ticker} total drop = ${totalPercentChange.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
+      console.log(`🚀 STICKY SQUEEZE: ${stock.ticker} total drop = ${totalShift.toFixed(2)}% (<= -10.0%) -> Permanently squeezed base to ₹${baseR2Price}! (Silent)`);
     }
 
     const calculatedPrice = Math.round((baseR2Price * (1 + (finalChangePct / 100))) * 100) / 100;
