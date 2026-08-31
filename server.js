@@ -116,6 +116,7 @@ function addPlayer(room, socketId, name) {
       longAvgPrice: 0,
       shortQty: 0,
       shortAvgPrice: 0,
+      shortMargin: 0,
     };
   });
   room.players.set(socketId, { name, cash: 1000000, portfolio });
@@ -172,14 +173,16 @@ function calculateNetWorth(player, stocks) {
   let portfolioDetails = {};
 
   stocks.forEach(s => {
-    const item = player.portfolio[s.ticker] || { longQty: 0, longAvgPrice: 0, shortQty: 0, shortAvgPrice: 0 };
+    const item = player.portfolio[s.ticker] || { longQty: 0, longAvgPrice: 0, shortQty: 0, shortAvgPrice: 0, shortMargin: 0 };
     const longQty = item.longQty || 0;
     const longAvgPrice = item.longAvgPrice || 0;
     const shortQty = item.shortQty || 0;
     const shortAvgPrice = item.shortAvgPrice || 0;
+    const shortMargin = typeof item.shortMargin === 'number' && item.shortMargin > 0
+      ? item.shortMargin
+      : (shortQty * shortAvgPrice * 0.20);
 
     const longValue = longQty * s.price;
-    const shortMargin = shortQty * shortAvgPrice;
 
     const longPnL = longQty > 0 ? (s.price - longAvgPrice) * longQty : 0;
     const shortPnL = shortQty > 0 ? (shortAvgPrice - s.price) * shortQty : 0;
@@ -407,26 +410,30 @@ function startGame(roomCode, room) {
           }, 5000);
         }
       } else if (room.phase === 'round3' && !room.isMarketFrozen) {
-        // Round 3: Baseline percentage decay / halving mechanism & small market noise (±0.2% to ±0.5%)
-        const elapsedSec = 600 - room.phaseTimer;
-        const progress = Math.min(Math.max(elapsedSec / 600, 0), 1);
-
+        // Round 3: Secret demand/supply price engine with 4-second smooth transition & zero-volume background drift (1.0% to 1.9%)
         room.stocks.forEach(stock => {
-          const startChange = typeof stock.r3StartChangePercent === 'number' ? stock.r3StartChangePercent : stock.changePercent;
-          // Target baseline percentage decays smoothly to EXACTLY 50% of starting percentage change by minute 10:00
-          const targetChangePercent = startChange * (1 - 0.5 * progress);
-          const targetPrice = stock.basePrice * (1 + targetChangePercent / 100);
+          if (typeof stock.targetPrice !== 'number') {
+            stock.targetPrice = stock.price;
+          }
 
-          // Mean reversion pull toward target baseline
-          const driftStep = (targetPrice - stock.price) * 0.05;
+          if (stock.transitionStepsRemaining && stock.transitionStepsRemaining > 0) {
+            // Smoothly interpolate stock price toward targetPrice over 4 seconds
+            const gap = stock.targetPrice - stock.price;
+            stock.price = Math.round((stock.price + (gap / stock.transitionStepsRemaining)) * 100) / 100;
+            stock.transitionStepsRemaining--;
+            if (stock.transitionStepsRemaining <= 0) {
+              stock.price = Math.round(stock.targetPrice * 100) / 100;
+            }
+          } else if (!stock.hasTradeInCycle) {
+            // Zero-volume organic market drift between 1.0% and 1.9%
+            const mag = 0.010 + Math.random() * 0.009;
+            const sign = Math.random() < 0.5 ? 1 : -1;
+            const delta = stock.price * mag * sign;
+            stock.price = Math.round((stock.price + delta) * 100) / 100;
+            stock.targetPrice = stock.price;
+          }
 
-          // Small random market noise: ±0.2% to ±0.5% per tick
-          const mag = 0.002 + Math.random() * 0.003;
-          const sign = Math.random() < 0.5 ? 1 : -1;
-          const noise = stock.price * mag * sign;
-
-          const newPrice = Math.round((stock.price + driftStep + noise) * 100) / 100;
-          stock.price = Math.max(newPrice, 1);
+          stock.hasTradeInCycle = false;
           stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
         });
         broadcastPrices(roomCode, room);
@@ -782,20 +789,22 @@ io.on('connection', (socket) => {
         });
 
       } else if (room.mode === 'match') {
-        // In Match mode: SELL reserves position value as margin collateral (no cash inflation!)
-        if (player.cash < totalCost) {
+        // In Match mode: SELL requires 20% margin collateral deduction from available cash
+        const requiredMargin = totalCost * 0.20;
+        if (player.cash < requiredMargin) {
           socket.emit('tradeResult', {
             success: false,
-            message: `Insufficient available cash for margin collateral. Need ₹${totalCost.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
+            message: `Insufficient available cash for 20% margin collateral. Need ₹${requiredMargin.toLocaleString('en-IN', { minimumFractionDigits: 2 })}.`,
           });
           return;
         }
 
-        player.cash -= totalCost; // Reserve margin collateral from available cash
+        player.cash -= requiredMargin; // Reserve 20% margin collateral from available cash
         const newShortQty = (item.shortQty || 0) + qty;
         const oldShortVal = (item.shortQty || 0) * (item.shortAvgPrice || 0);
         item.shortAvgPrice = (oldShortVal + totalCost) / newShortQty;
         item.shortQty = newShortQty;
+        item.shortMargin = (item.shortMargin || 0) + requiredMargin;
 
         socket.emit('tradeResult', {
           success: true,
@@ -804,18 +813,22 @@ io.on('connection', (socket) => {
       }
     }
 
-    // Active Player Trade Impact (STRICTLY Round 3 Only):
-    // BUY: +0.1% to +0.5% upward price pressure
-    // SELL/SHORT: -0.1% to -0.5% downward price pressure
+    // Round 3 Demand/Supply Order Flow Impact (Secret Engine):
+    // Buying (LONG): Every ₹5,00,000 invested increases target price by +1.5%.
+    // Shorting (SHORT): Every ₹5,00,000 shorted decreases target price by -1.5%.
+    // Transition target price smoothly over 4 seconds.
     if (room.mode === 'match' && room.phase === 'round3') {
-      const impactPct = 0.001 + Math.random() * 0.004;
-      if (action === 'BUY') {
-        stock.price = Math.round(stock.price * (1 + impactPct) * 100) / 100;
-      } else if (action === 'SELL' || action === 'SHORT') {
-        stock.price = Math.round(stock.price * (1 - impactPct) * 100) / 100;
+      const transactionValue = stock.price * qty;
+      const pctChange = (transactionValue / 500000) * 0.015; // 1.5% per 5 Lakhs
+      const sign = action === 'BUY' ? 1 : -1;
+      const priceDelta = stock.price * pctChange * sign;
+
+      if (typeof stock.targetPrice !== 'number') {
+        stock.targetPrice = stock.price;
       }
-      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
-      broadcastPrices(roomCode, room);
+      stock.targetPrice += priceDelta;
+      stock.hasTradeInCycle = true;
+      stock.transitionStepsRemaining = 4; // Smooth 4-second transition
     }
 
     broadcastPortfolios(roomCode, room);
@@ -857,13 +870,16 @@ io.on('connection', (socket) => {
         return;
       }
       const qtyToClose = item.shortQty;
-      const collateralReleased = qtyToClose * item.shortAvgPrice;
+      const marginRefund = typeof item.shortMargin === 'number' && item.shortMargin > 0
+        ? item.shortMargin
+        : (qtyToClose * item.shortAvgPrice * 0.20);
       const realizedPnL = (item.shortAvgPrice - stock.price) * qtyToClose;
-      const cashReturned = collateralReleased + realizedPnL;
+      const cashReturned = marginRefund + realizedPnL;
 
       player.cash = Math.max(0, player.cash + cashReturned);
       item.shortQty = 0;
       item.shortAvgPrice = 0;
+      item.shortMargin = 0;
 
       const pnlStr = realizedPnL >= 0 ? `+₹${realizedPnL.toFixed(2)}` : `-₹${Math.abs(realizedPnL).toFixed(2)}`;
       socket.emit('tradeResult', {
