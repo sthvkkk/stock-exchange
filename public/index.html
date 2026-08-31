@@ -142,6 +142,7 @@
                 <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg shadow-black/40">
                     <div class="text-slate-400 text-xs uppercase tracking-wider mb-1 font-semibold">Available Cash</div>
                     <div id="statCash" class="text-xl sm:text-2xl font-bold text-white">₹10,00,000.00</div>
+                    <p id="marginSubtext" class="text-xs text-amber-400 mt-1 font-medium hidden"></p>
                 </div>
                 <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg shadow-black/40">
                     <div class="text-slate-400 text-xs uppercase tracking-wider mb-1 font-semibold">Stock Value</div>
@@ -818,6 +819,25 @@
                 document.getElementById('statStockValue').textContent = formatMoney(data.stockValue || 0);
                 document.getElementById('statNetWorth').textContent = formatMoney(data.netWorth || 0);
                 document.getElementById('navNetWorth').textContent = formatMoney(data.netWorth || 0);
+
+                const marginSubtext = document.getElementById('marginSubtext');
+                if (marginSubtext) {
+                    let totalBlocked = typeof data.blockedMargin === 'number' ? data.blockedMargin : 0;
+                    if (totalBlocked <= 0 && currentPortfolioDetails) {
+                        Object.values(currentPortfolioDetails).forEach(item => {
+                            if (item.shortQty > 0) {
+                                totalBlocked += (item.shortQty * item.shortAvgPrice * 0.20);
+                            }
+                        });
+                    }
+                    if (totalBlocked > 0) {
+                        marginSubtext.textContent = `${formatMoney(totalBlocked)} blocked as 20% short margin`;
+                        marginSubtext.classList.remove('hidden');
+                    } else {
+                        marginSubtext.textContent = '';
+                        marginSubtext.classList.add('hidden');
+                    }
+                }
                 
                 renderPortfolioTable(currentPortfolioDetails);
                 renderStocks(Object.values(currentStocks));

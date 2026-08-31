@@ -210,6 +210,7 @@ function calculateNetWorth(player, stocks) {
 
   return {
     cash: Math.round(player.cash * 100) / 100,
+    blockedMargin: Math.round(shortCollateral * 100) / 100,
     stockValue: Math.round(stockValue * 100) / 100,
     netWorth: Math.round(netWorth * 100) / 100,
     portfolioDetails,
