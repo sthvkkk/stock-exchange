@@ -1000,41 +1000,58 @@ io.on('connection', (socket) => {
     endGame(roomCodeStr, room);
   });
 
-  // Master Price Manipulation — single authoritative listener
+  // Master Price Manipulation — single authoritative listener with fallback room search
   socket.on('master:updatePrice', (data) => {
-    console.log('===> MASTER PRICE EVENT RECEIVED:', data);
+    console.log('[MASTER PRICE EVENT RECV]:', data);
     if (!data || !data.ticker || data.newPrice === undefined) return;
 
-    const roomCodeStr = String(data.roomCode || socket.roomCode || '').trim();
-    const room = rooms.get(roomCodeStr);
+    const targetPrice = parseFloat(data.newPrice);
+    if (isNaN(targetPrice) || targetPrice <= 0) return;
 
-    if (!room) {
-      console.error('===> ROOM NOT FOUND FOR PRICE UPDATE:', roomCodeStr);
+    // Strategy 1: direct key match via rooms.get() (rooms is a Map)
+    let targetRoom = null;
+    let resolvedCode = '';
+    const inputCode = String(data.roomCode || socket.roomCode || '').trim();
+
+    if (inputCode && rooms.has(inputCode)) {
+      targetRoom = rooms.get(inputCode);
+      resolvedCode = inputCode;
+    } else {
+      // Strategy 2: search by socket membership or host socket id
+      const cleanCode = inputCode.replace(/\D/g, '');
+      for (const [key, r] of rooms.entries()) {
+        if (key === cleanCode || r.hostSocketId === socket.id || (r.players && r.players.has(socket.id))) {
+          targetRoom = r;
+          resolvedCode = key;
+          break;
+        }
+      }
+    }
+
+    if (!targetRoom) {
+      console.error('[MASTER PRICE ERROR] Could not locate active room for payload:', data, '| socket.roomCode:', socket.roomCode);
       return;
     }
 
-    const numericPrice = Number(data.newPrice);
-    if (isNaN(numericPrice) || numericPrice <= 0) return;
-
-    const stock = room.stocks.find(s => String(s.ticker).toUpperCase() === String(data.ticker).toUpperCase());
+    const stock = targetRoom.stocks.find(s => s.ticker.toUpperCase() === String(data.ticker).toUpperCase());
     if (stock) {
-      stock.price          = Math.round(numericPrice * 100) / 100;
-      stock.currentPrice   = numericPrice;
-      stock.basePrice      = numericPrice;
-      stock.round1BasePrice = numericPrice;
-      stock.round2ClosePrice = numericPrice;
-      stock.round3BasePrice  = numericPrice;
-      stock.originalRound3BasePrice = numericPrice;
-      stock.netInvestment  = 0;
-      stock.baselineNI     = 0;
-      stock.changePercent  = 0;
+      stock.price                   = Math.round(targetPrice * 100) / 100;
+      stock.currentPrice            = targetPrice;
+      stock.basePrice               = targetPrice;
+      stock.round1BasePrice         = targetPrice;
+      stock.round2ClosePrice        = targetPrice;
+      stock.round3BasePrice         = targetPrice;
+      stock.originalRound3BasePrice = targetPrice;
+      stock.netInvestment           = 0;
+      stock.baselineNI              = 0;
+      stock.changePercent           = 0;
 
-      console.log(`===> SUCCESS: Updated ${stock.ticker} price to ${numericPrice} in room ${roomCodeStr}`);
+      console.log(`[MASTER PRICE SUCCESS] ${stock.ticker} updated to ₹${targetPrice} in room ${resolvedCode}`);
 
-      io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
-      broadcastPrices(roomCodeStr, room);
-      broadcastPortfolios(roomCodeStr, room);
-      broadcastLeaderboard(roomCodeStr, room);
+      io.to(resolvedCode).emit('market:update', { stocks: targetRoom.stocks });
+      broadcastPrices(resolvedCode, targetRoom);
+      broadcastPortfolios(resolvedCode, targetRoom);
+      broadcastLeaderboard(resolvedCode, targetRoom);
       socket.emit('masterActionResult', { success: true, message: `Updated ${stock.ticker} to ₹${stock.price}` });
     }
   });
