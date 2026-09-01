@@ -1050,7 +1050,10 @@ io.on('connection', (socket) => {
 
       console.log(`[MASTER PRICE SUCCESS] ${stock.ticker} updated to ₹${targetPrice} in room ${resolvedCode}`);
 
+      // Broadcast immediately so players and host sync instantly
       io.to(resolvedCode).emit('market:update', { stocks: targetRoom.stocks });
+      io.to(resolvedCode).emit('roomState', targetRoom);
+      
       broadcastPrices(resolvedCode, targetRoom);
       broadcastPortfolios(resolvedCode, targetRoom);
       broadcastLeaderboard(resolvedCode, targetRoom);

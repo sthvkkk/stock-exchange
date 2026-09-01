@@ -658,7 +658,7 @@
                         div.innerHTML = `
                             <div>
                                 <span class="ticker-label text-sm font-bold text-white">${stock.ticker}</span>
-                                <div class="text-xs text-slate-400">Current: <span id="current-price-${stock.ticker}">₹${stock.price}</span></div>
+                                <div class="text-xs text-slate-400">Current: <span id="current-price-${stock.ticker}" class="current-price-label">₹${stock.price}</span></div>
                             </div>
                             <div class="flex gap-2 items-center">
                                 <input
@@ -667,39 +667,13 @@
                                   id="manual-price-input-${stock.ticker}"
                                   value="${stock.price}"
                                   ${!canEditPrice ? 'disabled' : ''}
+                                  onkeydown="if(event.key==='Enter') window.savePriceManual(this, '${stock.ticker}')"
                                   class="w-24 bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
                                 >
-                                <button type="button" id="btn-save-${stock.ticker}" ${!canEditPrice ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
+                                <button type="button" id="btn-save-${stock.ticker}" onclick="window.savePriceManual(this, '${stock.ticker}')" ${!canEditPrice ? 'disabled' : ''} class="btn-save bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
                             </div>
                         `;
                         masterInputs.appendChild(div);
-
-                        // Attach event listener — no inline strings, direct JS closure
-                        const btn = div.querySelector(`#btn-save-${stock.ticker}`);
-                        const inputEl = div.querySelector(`#manual-price-input-${stock.ticker}`);
-                        const ticker = stock.ticker;
-
-                        const doSave = function(e) {
-                            if (e) { e.preventDefault(); e.stopPropagation(); }
-                            const val = parseFloat(inputEl.value);
-                            console.log(`[MANUAL PRICE SUBMIT] ${ticker} ->`, val);
-                            if (isNaN(val) || val <= 0) { alert('Enter a valid price'); return; }
-                            socket.emit('master:updatePrice', {
-                                roomCode: String(window.currentRoomCode || currentRoomCode || '').trim(),
-                                ticker: ticker,
-                                newPrice: val
-                            });
-                            
-                            // FORCE INSTANT DOM LABEL UPDATE ON SAVE
-                            const lbl = document.getElementById(`current-price-${ticker}`);
-                            if (lbl) lbl.innerText = `₹${val.toFixed(2)}`;
-                            
-                            showToast(`Sent override: ${ticker} = ₹${val.toFixed(2)}`, 'success');
-                        };
-
-                        if (btn) btn.onclick = doSave;
-                        if (inputEl) inputEl.onkeydown = (e) => { if (e.key === 'Enter') doSave(e); };
-
                     } else {
                         // ── Subsequent ticks: ONLY update the current-price label ──────
                         const lbl = document.getElementById(`current-price-${stock.ticker}`);
@@ -736,27 +710,36 @@
 
         // directSavePrice and all aliases are defined below
 
-        // Backward-compat aliases — route through the new doSave JS listener where possible, else locate by ID
-        window.directSavePrice = function(btnElement, ticker) {
-            const inputEl = document.getElementById(`manual-price-input-${ticker}`);
-            if (!inputEl) { alert('Input not found for ' + ticker); return; }
-            const val = parseFloat(inputEl.value);
-            if (isNaN(val) || val <= 0) { alert('Enter a valid price'); return; }
-            console.log(`[CLIENT EMIT] Updating ${ticker} to ${val}`);
+        // Backward-compat aliases — route through the new savePriceManual where possible
+        window.savePriceManual = function(btnEl, ticker) {
+            const container = btnEl ? btnEl.closest('div, .master-price-card, .price-card, .master-price-item') : null;
+            let input = container ? container.querySelector('input') : null;
+            if (!input) input = document.getElementById(`manual-price-input-${ticker}`);
+            if (!input) return alert('Input missing!');
+            
+            const newPrice = parseFloat(input.value);
+            if (isNaN(newPrice) || newPrice <= 0) return alert('Enter a valid price');
+
+            // Instantly update the DOM text label under the ticker
+            const label = container ? container.querySelector('.current-price-label, span[id^="current-price"]') : document.getElementById(`current-price-${ticker}`);
+            if (label) label.innerText = `₹${newPrice.toFixed(2)}`;
+
+            // Emit socket event
+            const rCode = String(window.currentRoomCode || currentRoomCode || '').replace(/\D/g, '');
             socket.emit('master:updatePrice', {
-                roomCode: String(window.currentRoomCode || currentRoomCode || '').trim(),
-                ticker: String(ticker),
-                newPrice: val
+                roomCode: rCode,
+                ticker: ticker,
+                newPrice: newPrice
             });
-            const lbl = document.getElementById(`current-price-${ticker}`);
-            if (lbl) lbl.innerText = `₹${val.toFixed(2)}`;
-            showToast(`Sent override: ${ticker} = ₹${val.toFixed(2)}`, 'success');
+
+            if (typeof showToast === 'function') showToast(`Updated ${ticker} to ₹${newPrice.toFixed(2)}`);
         };
-        window.handleMasterSave  = (ticker, btn) => window.directSavePrice(btn, ticker);
-        window.forceUpdatePrice  = (ticker) => window.directSavePrice(null, ticker);
-        window.submitMasterPrice = (ticker) => window.directSavePrice(null, ticker);
-        window.saveMasterPrice   = (ticker) => window.directSavePrice(null, ticker);
-        window.applyMasterPrice  = (ticker) => window.directSavePrice(null, ticker);
+        window.directSavePrice   = (btn, ticker) => window.savePriceManual(btn, ticker);
+        window.handleMasterSave  = (ticker, btn) => window.savePriceManual(btn, ticker);
+        window.forceUpdatePrice  = (ticker) => window.savePriceManual(null, ticker);
+        window.submitMasterPrice = (ticker) => window.savePriceManual(null, ticker);
+        window.saveMasterPrice   = (ticker) => window.savePriceManual(null, ticker);
+        window.applyMasterPrice  = (ticker) => window.savePriceManual(null, ticker);
 
         // MASTER CONTROL SUITE ACTIONS
         window.masterTogglePause = () => {
