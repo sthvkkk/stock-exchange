@@ -1073,26 +1073,46 @@ io.on('connection', (socket) => {
       stock.price = price;
       stock.currentPrice = price;
       
-      // DO NOT overwrite stock.basePrice or round start prices so we preserve the percentage baseline!
-      stock.netInvestment = 0;
-      stock.baselineNI = 0;
-
-      // Recalculate the percentage change relative to original base price
-      const base = stock.round2ClosePrice || stock.basePrice || stock.initialPrice;
+      stock.currentPrice = Number(data.newPrice);
+      stock.price = stock.currentPrice;
       
-      if (price < base * 1.10) { 
+      const activeBase = stock.round2ClosePrice || stock.round3BasePrice || stock.basePrice;
+      
+      if (targetRoom.phase === 'round3') {
+        const basePrice = stock.originalRound3BasePrice || stock.round2ClosePrice || stock.basePrice;
+        
+        let totalLongQty = 0;
+        let totalShortQty = 0;
+        targetRoom.players.forEach(p => {
+          const item = p.portfolio[stock.ticker];
+          if (item) {
+            totalLongQty += (item.longQty || 0);
+            totalShortQty += (item.shortQty || 0);
+          }
+        });
+        const absoluteNI = (totalLongQty - totalShortQty) * basePrice;
+        
+        // Algebraically solve for baselineNI so that uncappedPrice == stock.currentPrice
+        const requiredShiftPercent = ((stock.currentPrice / basePrice) - 1) * 100;
+        const requiredNetInvestment = (requiredShiftPercent / 2) * 1000000;
+        stock.baselineNI = absoluteNI - requiredNetInvestment;
+        stock.netInvestment = requiredNetInvestment;
+      } else {
+        stock.netInvestment = 0;
+        stock.baselineNI = 0;
+      }
+      
+      const shift = ((stock.currentPrice - activeBase) / activeBase) * 100;
+      
+      if (shift < 10.0) {
         stock.isCrashed = false;
         stock.wasLoggedCrash = false;
       } else {
         stock.isCrashed = true;
         stock.wasLoggedCrash = false;
       }
-
-      stock.isSqueezed = false; // Reset any previous squeeze states just in case
-
-      if (base > 0) {
-        stock.changePercent = ((stock.currentPrice - base) / base) * 100;
-      }
+      
+      stock.changePercent = shift;
 
       console.log(`[SERVER SUCCESS] ${stock.ticker} updated to ₹${price} in room ${roomKey}`);
 
