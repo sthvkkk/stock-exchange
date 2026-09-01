@@ -642,7 +642,7 @@
             if(isMaster && masterInputs) {
                 const canEditPrice = isMarketFrozen || isPaused;
                 stocksArray.forEach(stock => {
-                    let input = document.getElementById(`masterInput-${stock.ticker}`);
+                    let input = document.getElementById(`master-input-${stock.ticker}`);
                     let currentDisplay = document.getElementById(`masterCurrentPrice-${stock.ticker}`);
                     let btn = document.getElementById(`masterBtn-${stock.ticker}`);
 
@@ -655,8 +655,8 @@
                                 <div class="text-xs text-slate-400">Current: <span id="masterCurrentPrice-${stock.ticker}">${formatMoney(stock.price)}</span></div>
                             </div>
                             <div class="flex gap-2 items-center">
-                                <input type="number" step="0.01" id="masterInput-${stock.ticker}" value="${stock.price}" ${!canEditPrice ? 'disabled' : ''} onkeydown="if(event.key==='Enter') applyMasterPrice('${stock.ticker}', this)" class="w-24 bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50">
-                                <button id="masterBtn-${stock.ticker}" onclick="applyMasterPrice('${stock.ticker}', this)" ${!canEditPrice ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
+                                <input type="number" step="0.01" id="master-input-${stock.ticker}" value="${stock.price}" ${!canEditPrice ? 'disabled' : ''} onkeydown="if(event.key==='Enter') saveMasterPrice('${stock.ticker}')" class="price-input w-24 bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50">
+                                <button id="masterBtn-${stock.ticker}" onclick="saveMasterPrice('${stock.ticker}')" ${!canEditPrice ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
                             </div>
                         `;
                         masterInputs.appendChild(div);
@@ -694,36 +694,28 @@
             return roomCode;
         }
 
-        window.applyMasterPrice = (ticker, buttonElement) => {
-            const code = getActiveRoomCode();
-            
-            let inputEl = null;
-            if (buttonElement) {
-                // Target the input inside the specific stock card block
-                inputEl = buttonElement.closest('.master-price-card, div').querySelector('input[type="number"], input');
-            }
-            if (!inputEl) {
-                inputEl = document.querySelector(`.price-input[data-ticker="${ticker}"]`) || document.getElementById(`input-${ticker}`) || document.getElementById(`masterInput-${ticker}`);
-            }
-            
-            if (!inputEl) return showToast('Could not find price input field', 'error');
-            
+        window.saveMasterPrice = function(ticker) {
+            const inputEl = document.getElementById(`master-input-${ticker}`);
+            if (!inputEl) return;
             const newPrice = parseFloat(inputEl.value);
+            if (isNaN(newPrice) || newPrice <= 0) return showToast('Enter a valid price', 'error');
 
-            if(isNaN(newPrice) || newPrice <= 0) return showToast('Enter valid price');
-            
+            const code = getActiveRoomCode();
             if (socket && code) {
-                socket.emit('master:updatePrice', { roomCode: String(code).trim(), ticker, newPrice, hostToken });
+                socket.emit('master:updatePrice', { roomCode: String(code).trim(), ticker: ticker, newPrice: newPrice, hostToken });
             }
-            
+
             const currentDisplay = document.getElementById(`masterCurrentPrice-${ticker}`);
-            if(currentDisplay) currentDisplay.textContent = formatMoney(newPrice);
+            if (currentDisplay) currentDisplay.textContent = formatMoney(newPrice);
             
             const mainDisplay = document.getElementById(`price-${ticker}`);
             if (mainDisplay) mainDisplay.textContent = formatMoney(newPrice);
 
-            showToast(`Updated ${ticker} price to ₹${newPrice}`, 'success');
+            showToast(`Updated ${ticker} price to ₹${newPrice.toFixed(2)}`, 'success');
         };
+
+        // Keep old alias in case other callers use it
+        window.applyMasterPrice = (ticker) => window.saveMasterPrice(ticker);
 
         // MASTER CONTROL SUITE ACTIONS
         window.masterTogglePause = () => {
