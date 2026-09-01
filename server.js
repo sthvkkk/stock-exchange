@@ -1002,7 +1002,7 @@ io.on('connection', (socket) => {
 
   // Master Price Manipulation — single authoritative listener with fallback room search
   socket.on('master:updatePrice', (data) => {
-    console.log('[MASTER PRICE EVENT RECV]:', data);
+    console.log('RECEIVED MASTER PRICE UPDATE:', data);
     if (!data || !data.ticker || data.newPrice === undefined) return;
 
     const targetPrice = parseFloat(data.newPrice);
