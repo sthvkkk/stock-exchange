@@ -1000,52 +1000,58 @@ io.on('connection', (socket) => {
     endGame(roomCodeStr, room);
   });
 
-  // Master Price Manipulation (During Breaks OR Paused in Match Mode)
-  const handleMasterPriceUpdate = ({ roomCode, ticker, newPrice, hostToken }) => {
+  // Master Price Manipulation
+  const handleMasterPriceUpdate = (data) => {
+    const { roomCode, ticker, newPrice, hostToken } = data;
+    console.log('[SERVER RECV] master:updatePrice:', data);
+
     const roomCodeStr = String(roomCode || socket.roomCode).trim();
     const room = rooms.get(roomCodeStr);
     if (!room) {
+      console.error('[SERVER ERROR] Room not found for price update:', roomCodeStr);
       return socket.emit('error', { message: 'Room not found.' });
     }
     if (room.mode !== 'match') {
       return socket.emit('error', { message: 'Master control is only available in Match mode.' });
     }
     if (!verifyHost(socket, room, hostToken)) {
-      socket.emit('error', { message: 'Only the Master can update stock prices.' });
-      return;
-    }
-    if (!room.isMarketFrozen && !room.isPaused) {
-      socket.emit('error', { message: 'Prices can only be edited during break phases or when paused!' });
-      return;
+      return socket.emit('error', { message: 'Only the Master can update stock prices.' });
     }
 
-    const stock = room.stocks.find(s => s.ticker === ticker);
-    const targetPrice = Number(newPrice);
-    if (stock && !isNaN(targetPrice) && targetPrice > 0) {
-      stock.price = Math.round(targetPrice * 100) / 100;
-
-      // Hard-overwrite every price baseline so no formula can revert the change
-      stock.currentPrice = targetPrice;
-      stock.basePrice = targetPrice;
-      stock.round1BasePrice = targetPrice;
-      stock.round2ClosePrice = targetPrice;
-      stock.round3BasePrice = targetPrice;
-      stock.originalRound3BasePrice = targetPrice;
-
-      // Zero order-flow accumulators so dynamic pricing ticks from the new baseline
-      stock.netInvestment = 0;
-      stock.baselineNI = 0;
-
-      stock.changePercent = 0;
-
-      // Broadcast immediately
-      io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
-      broadcastPrices(roomCodeStr, room);
-      broadcastPortfolios(roomCodeStr, room);
-      broadcastLeaderboard(roomCodeStr, room);
-      console.log(`🛠️ Master updated ${ticker} price to ₹${stock.price} in room ${roomCodeStr}`);
-      socket.emit('masterActionResult', { success: true, message: `Updated ${ticker} price to ₹${stock.price}` });
+    const stock = room.stocks.find(s => s.ticker === String(ticker));
+    if (!stock) {
+      return socket.emit('error', { message: `Stock ${ticker} not found.` });
     }
+
+    const targetPrice = parseFloat(newPrice);
+    if (isNaN(targetPrice) || targetPrice <= 0) {
+      return socket.emit('error', { message: 'Invalid price value.' });
+    }
+
+    stock.price = Math.round(targetPrice * 100) / 100;
+
+    // Hard-overwrite every price baseline so no formula can revert the change
+    stock.currentPrice = targetPrice;
+    stock.basePrice = targetPrice;
+    stock.round1BasePrice = targetPrice;
+    stock.round2ClosePrice = targetPrice;
+    stock.round3BasePrice = targetPrice;
+    stock.originalRound3BasePrice = targetPrice;
+
+    // Zero order-flow accumulators so dynamic pricing ticks from the new baseline
+    stock.netInvestment = 0;
+    stock.baselineNI = 0;
+
+    stock.changePercent = 0;
+
+    console.log(`🛠️ Master set ${ticker} = ₹${stock.price} in room ${roomCodeStr}`);
+
+    // Broadcast immediately to whole room
+    io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
+    broadcastPrices(roomCodeStr, room);
+    broadcastPortfolios(roomCodeStr, room);
+    broadcastLeaderboard(roomCodeStr, room);
+    socket.emit('masterActionResult', { success: true, message: `Updated ${ticker} price to ₹${stock.price}` });
   };
 
   socket.on('masterUpdatePrice', handleMasterPriceUpdate);
