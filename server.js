@@ -485,36 +485,51 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
 
     const roundStartPrice = stock.round2ClosePrice || stock.round3BasePrice || stock.basePrice;
     
-    // Only apply organic movement if NOT crashed or surged
-    if (!stock.isCrashed && !stock.isSurged) {
+    // 1. If ALREADY CRASHED (-30%), lock target at -30% (DO NOT evaluate negative surge trigger)
+    if (stock.isCrashed) {
+      const crashTarget = roundStartPrice * 0.70;
+      const noise = (Math.random() * 1.9 - 0.95) / 100;
+      stock.currentPrice = crashTarget * (1 + noise);
+    }
+    // 2. If ALREADY SURGED (+30%), lock target at +30% (DO NOT evaluate positive crash trigger)
+    else if (stock.isSurged) {
+      const surgeTarget = roundStartPrice * 1.30;
+      const noise = (Math.random() * 1.9 - 0.95) / 100;
+      stock.currentPrice = surgeTarget * (1 + noise);
+    }
+    // 3. ORGANIC / UNLOCKED STATE: Only evaluate triggers if NEITHER flag is true
+    else {
       stock.currentPrice = uncappedPrice;
+      const currentShift = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
+      
+      if (currentShift >= 10.0) {
+        // Trigger positive crash to -30%
+        stock.isCrashed = true;
+        stock.isSurged = false;
+        const crashTarget = roundStartPrice * 0.70;
+        const noise = (Math.random() * 1.9 - 0.95) / 100;
+        stock.currentPrice = crashTarget * (1 + noise);
+        
+        if (!stock.wasLoggedCrash) {
+          console.log(`⚡ CRASH: ${stock.ticker} shifted ${currentShift.toFixed(2)}% >= 10.0% -> Pegged at -30%`);
+          stock.wasLoggedCrash = true;
+        }
+      } else if (currentShift <= -10.0) {
+        // Trigger negative surge to +30%
+        stock.isSurged = true;
+        stock.isCrashed = false;
+        const surgeTarget = roundStartPrice * 1.30;
+        const noise = (Math.random() * 1.9 - 0.95) / 100;
+        stock.currentPrice = surgeTarget * (1 + noise);
+        
+        if (!stock.wasLoggedSurge) {
+          console.log(`🚀 SURGE: ${stock.ticker} shifted ${currentShift.toFixed(2)}% <= -10.0% -> Pegged at +30%`);
+          stock.wasLoggedSurge = true;
+        }
+      }
     }
 
-    const currentShift = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
-
-    let calculatedPrice = stock.currentPrice;
-
-    if (currentShift <= -10.0 || stock.isSurged) {
-      stock.isSurged = true;
-      const surgeTarget = roundStartPrice * 1.30; // +30% surge price
-      const noise = (Math.random() * 1.9 - 0.95) / 100;
-      calculatedPrice = surgeTarget * (1 + noise);
-      if (currentShift <= -10.0 && !stock.wasLoggedSurge) {
-        console.log(`🚀 SURGE: ${stock.ticker} shifted ${currentShift.toFixed(2)}% <= -10.0% -> Pegged at +30% (₹${calculatedPrice})`);
-        stock.wasLoggedSurge = true;
-      }
-    } else if (currentShift >= 10.0 || stock.isCrashed) {
-      stock.isCrashed = true;
-      const crashTarget = roundStartPrice * 0.70; // -30% crash price
-      const noise = (Math.random() * 1.9 - 0.95) / 100;
-      calculatedPrice = crashTarget * (1 + noise);
-      if (currentShift >= 10.0 && !stock.wasLoggedCrash) {
-        console.log(`⚡ CRASH: ${stock.ticker} shifted ${currentShift.toFixed(2)}% >= 10.0% -> Pegged at -30% (₹${calculatedPrice})`);
-        stock.wasLoggedCrash = true;
-      }
-    }
-
-    stock.price = Math.max(Math.round(calculatedPrice * 100) / 100, 1);
+    stock.price = Math.max(Math.round(stock.currentPrice * 100) / 100, 1);
     stock.currentPrice = stock.price;
     stock.changePercent = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
   });
