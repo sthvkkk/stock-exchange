@@ -1020,14 +1020,19 @@ io.on('connection', (socket) => {
     const parsedPrice = parseFloat(newPrice);
     if (stock && !isNaN(parsedPrice) && parsedPrice > 0) {
       stock.price = Math.round(parsedPrice * 100) / 100;
-      stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
-
-      if (room.phase === 'round3' || room.phase === 'break2') {
-        stock.round2ClosePrice = stock.price;
-        stock.round2ClosingPrice = stock.price;
-        stock.r3BaselineNI = 0;
-      }
       
+      // Update all reference bases so formulas don't revert the change
+      stock.basePrice = stock.price;
+      stock.roundBasePrice = stock.price;
+      stock.round2ClosePrice = stock.price;
+      stock.round2ClosingPrice = stock.price;
+      stock.originalRound3BasePrice = stock.price;
+      stock.r3BaselineNI = 0;
+      
+      stock.changePercent = 0; // Since base is updated, change is 0%
+
+      // Force market catalog update
+      io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
       broadcastPrices(roomCodeStr, room);
       broadcastPortfolios(roomCodeStr, room);
       broadcastLeaderboard(roomCodeStr, room);

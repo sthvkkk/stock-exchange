@@ -696,15 +696,24 @@
 
         window.applyMasterPrice = (ticker) => {
             const code = getActiveRoomCode();
-            const input = document.getElementById(`masterInput-${ticker}`);
-            if(!input) return;
-            const newPrice = parseFloat(input.value);
+            
+            const inputElement = document.getElementById(`price-input-${ticker}`) || document.querySelector(`input[data-ticker="${ticker}"]`) || document.getElementById(`masterInput-${ticker}`);
+            if (!inputElement) return showToast('Could not find price input field', 'error');
+            const rawValue = inputElement.value;
+            const newPrice = parseFloat(rawValue);
+
             if(isNaN(newPrice) || newPrice <= 0) return showToast('Enter valid price');
+            
             if (socket && code) {
                 socket.emit('master:updatePrice', { roomCode: String(code).trim(), ticker, newPrice, hostToken });
             }
+            
             const currentDisplay = document.getElementById(`masterCurrentPrice-${ticker}`);
             if(currentDisplay) currentDisplay.textContent = formatMoney(newPrice);
+            
+            const mainDisplay = document.getElementById(`price-${ticker}`);
+            if (mainDisplay) mainDisplay.textContent = formatMoney(newPrice);
+
             showToast(`Updated ${ticker} price to ₹${newPrice}`, 'success');
         };
 
