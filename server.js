@@ -483,10 +483,10 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     const totalShiftPercent = demandPercent + currentTickNoise;
     const uncappedPrice = basePrice * (1 + (totalShiftPercent / 100));
 
-    const roundStartPrice = stock.round2ClosePrice || stock.basePrice;
+    const roundStartPrice = stock.round2ClosePrice || stock.round3BasePrice || stock.basePrice;
     
-    // Only apply organic movement if NOT crashed
-    if (!stock.isCrashed) {
+    // Only apply organic movement if NOT crashed or surged
+    if (!stock.isCrashed && !stock.isSurged) {
       stock.currentPrice = uncappedPrice;
     }
 
@@ -494,11 +494,20 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
 
     let calculatedPrice = stock.currentPrice;
 
-    if (currentShift >= 10.0 || stock.isCrashed) {
-      stock.isCrashed = true;
-      const crashedTarget = roundStartPrice * 0.70;
+    if (currentShift <= -10.0 || stock.isSurged) {
+      stock.isSurged = true;
+      const surgeTarget = roundStartPrice * 1.30; // +30% surge price
       const noise = (Math.random() * 1.9 - 0.95) / 100;
-      calculatedPrice = crashedTarget * (1 + noise);
+      calculatedPrice = surgeTarget * (1 + noise);
+      if (currentShift <= -10.0 && !stock.wasLoggedSurge) {
+        console.log(`🚀 SURGE: ${stock.ticker} shifted ${currentShift.toFixed(2)}% <= -10.0% -> Pegged at +30% (₹${calculatedPrice})`);
+        stock.wasLoggedSurge = true;
+      }
+    } else if (currentShift >= 10.0 || stock.isCrashed) {
+      stock.isCrashed = true;
+      const crashTarget = roundStartPrice * 0.70; // -30% crash price
+      const noise = (Math.random() * 1.9 - 0.95) / 100;
+      calculatedPrice = crashTarget * (1 + noise);
       if (currentShift >= 10.0 && !stock.wasLoggedCrash) {
         console.log(`⚡ CRASH: ${stock.ticker} shifted ${currentShift.toFixed(2)}% >= 10.0% -> Pegged at -30% (₹${calculatedPrice})`);
         stock.wasLoggedCrash = true;
@@ -567,6 +576,8 @@ function advanceMatchPhase(roomCode, room) {
       
       if (s.changePercent >= 10.0) {
         s.isCrashed = true;
+      } else if (s.changePercent <= -10.0) {
+        s.isSurged = true;
       }
     });
 
@@ -1104,12 +1115,21 @@ io.on('connection', (socket) => {
       
       const shift = ((stock.currentPrice - activeBase) / activeBase) * 100;
       
-      if (shift < 10.0) {
+      if (shift <= -10.0) {
+        stock.isSurged = true;
+        stock.wasLoggedSurge = false;
         stock.isCrashed = false;
         stock.wasLoggedCrash = false;
-      } else {
+      } else if (shift >= 10.0) {
         stock.isCrashed = true;
         stock.wasLoggedCrash = false;
+        stock.isSurged = false;
+        stock.wasLoggedSurge = false;
+      } else {
+        stock.isCrashed = false;
+        stock.wasLoggedCrash = false;
+        stock.isSurged = false;
+        stock.wasLoggedSurge = false;
       }
       
       stock.changePercent = shift;
