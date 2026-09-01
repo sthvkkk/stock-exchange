@@ -531,7 +531,7 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
 
     stock.price = Math.max(Math.round(stock.currentPrice * 100) / 100, 1);
     stock.currentPrice = stock.price;
-    const displayBase = stock.round2ClosePrice || stock.basePrice;
+    const displayBase = stock.round1BasePrice || stock.basePrice;
     stock.changePercent = ((stock.currentPrice - displayBase) / displayBase) * 100;
   });
 
@@ -593,8 +593,9 @@ function advanceMatchPhase(roomCode, room) {
       s.isCrashed = false;
       s.isSurged = false;
       
-      // Calculate overall display percentage relative to round2ClosePrice
-      s.changePercent = ((s.currentPrice - s.round2ClosePrice) / s.round2ClosePrice) * 100;
+      // Calculate overall display percentage relative to original Round 1 base price
+      const displayBase = s.round1BasePrice || s.basePrice;
+      s.changePercent = ((s.currentPrice - displayBase) / displayBase) * 100;
     });
 
     // Initial recalculation for Round 3 start
@@ -1134,7 +1135,7 @@ io.on('connection', (socket) => {
       stock.wasLoggedCrash = false;
       stock.wasLoggedSurge = false;
 
-      const displayBase = stock.round2ClosePrice || stock.basePrice || stock.initialPrice;
+      const displayBase = stock.round1BasePrice || stock.basePrice || stock.initialPrice;
       stock.changePercent = ((stock.currentPrice - displayBase) / displayBase) * 100;
 
       if (targetRoom.phase === 'round3') {
