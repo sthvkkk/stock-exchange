@@ -627,7 +627,7 @@
                             <div class="text-xs text-slate-400 font-medium truncate block">${stock.name || 'Company'}</div>
                         </div>
                         <div class="text-right flex-shrink-0">
-                            <div id="price-${stock.ticker}" data-raw="${stock.price}" class="text-xl font-extrabold text-white whitespace-nowrap px-1 py-0.5 rounded-lg transition-all">${formatMoney(stock.price)}</div>
+                            <div id="price-${stock.ticker}" data-raw="${stock.price}" class="text-xl font-extrabold text-white whitespace-nowrap px-1 py-0.5 rounded-lg transition-all current-price-label">${formatMoney(stock.price)}</div>
                             <div class="text-xs sm:text-sm font-semibold ${changeClass}">${signStr}${stock.changePercent.toFixed(2)}%</div>
                         </div>
                     </div>
@@ -636,6 +636,12 @@
                         <button onclick="event.stopPropagation(); window.openTradeModal('${stock.ticker}')" class="bg-blue-600/90 hover:bg-blue-500 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm">Trade</button>
                     </div>
                 `;
+
+                // Update master panel labels globally without resetting the inputs container if not needed
+                const masterLbl = document.getElementById(`current-price-${stock.ticker}`);
+                if (masterLbl) {
+                    masterLbl.innerText = `₹${stock.price}`;
+                }
             });
 
             // Master Inputs Generator — render rows ONCE; on ticks only update the price label
@@ -683,8 +689,11 @@
                                 ticker: ticker,
                                 newPrice: val
                             });
+                            
+                            // FORCE INSTANT DOM LABEL UPDATE ON SAVE
                             const lbl = document.getElementById(`current-price-${ticker}`);
                             if (lbl) lbl.innerText = `₹${val.toFixed(2)}`;
+                            
                             showToast(`Sent override: ${ticker} = ₹${val.toFixed(2)}`, 'success');
                         };
 
