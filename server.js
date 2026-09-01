@@ -473,8 +473,11 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       }
     });
 
-    const netInvestmentRupees = (totalLongQty - totalShortQty) * basePrice;
-    const demandPercent = (netInvestmentRupees / 1000000) * 2;
+    const absoluteNI = (totalLongQty - totalShortQty) * basePrice;
+    if (typeof stock.baselineNI === 'undefined') stock.baselineNI = 0;
+    
+    stock.netInvestment = absoluteNI - stock.baselineNI;
+    const demandPercent = (stock.netInvestment / 1000000) * 2;
     const currentTickNoise = stock.r3TickNoisePct || 0;
     const totalShiftPercent = demandPercent + currentTickNoise;
 
@@ -1021,17 +1024,23 @@ io.on('connection', (socket) => {
     if (stock && !isNaN(parsedPrice) && parsedPrice > 0) {
       stock.price = Math.round(parsedPrice * 100) / 100;
       
-      // Update all reference bases so formulas don't revert the change
+      stock.currentPrice = stock.price;
       stock.basePrice = stock.price;
-      stock.roundBasePrice = stock.price;
+      stock.round1BasePrice = stock.price;
       stock.round2ClosePrice = stock.price;
-      stock.round2ClosingPrice = stock.price;
+      stock.round3BasePrice = stock.price;
       stock.originalRound3BasePrice = stock.price;
-      stock.r3BaselineNI = 0;
       
-      stock.changePercent = 0; // Since base is updated, change is 0%
+      let totalLong = 0; let totalShort = 0;
+      room.players.forEach(player => {
+          const item = player.portfolio[ticker];
+          if (item) { totalLong += (item.longQty || 0); totalShort += (item.shortQty || 0); }
+      });
+      stock.baselineNI = (totalLong - totalShort) * stock.price;
+      stock.netInvestment = 0;
+      
+      stock.changePercent = 0; 
 
-      // Force market catalog update
       io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
       broadcastPrices(roomCodeStr, room);
       broadcastPortfolios(roomCodeStr, room);

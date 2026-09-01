@@ -697,10 +697,10 @@
         window.applyMasterPrice = (ticker) => {
             const code = getActiveRoomCode();
             
-            const inputElement = document.getElementById(`price-input-${ticker}`) || document.querySelector(`input[data-ticker="${ticker}"]`) || document.getElementById(`masterInput-${ticker}`);
-            if (!inputElement) return showToast('Could not find price input field', 'error');
-            const rawValue = inputElement.value;
-            const newPrice = parseFloat(rawValue);
+            const inputEl = document.querySelector(`.price-input[data-ticker="${ticker}"]`) || document.getElementById(`input-${ticker}`) || document.getElementById(`masterInput-${ticker}`);
+            if (!inputEl) return showToast('Could not find price input field', 'error');
+            
+            const newPrice = parseFloat(inputEl.value);
 
             if(isNaN(newPrice) || newPrice <= 0) return showToast('Enter valid price');
             
