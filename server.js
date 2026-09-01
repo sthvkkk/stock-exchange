@@ -479,36 +479,53 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
     stock.netInvestment = absoluteNI - stock.baselineNI;
     const demandPercent = (stock.netInvestment / 1000000) * 2;
     const currentTickNoise = stock.r3TickNoisePct || 0;
+    
+    // Default uncapped demand movement
     const totalShiftPercent = demandPercent + currentTickNoise;
-
     const uncappedPrice = basePrice * (1 + (totalShiftPercent / 100));
-    const movementPercent = ((uncappedPrice - basePrice) / basePrice) * 100;
 
-    let calculatedPrice;
+    const roundStartPrice = stock.round2ClosePrice || stock.basePrice;
+    
+    // Only apply organic movement if NOT crashed or squeezed
+    if (!stock.isCrashed && !stock.isSqueezed) {
+      stock.currentPrice = uncappedPrice;
+    }
 
-    if (!stock.isCrashed && !stock.isSqueezed && movementPercent >= 10.0) {
+    const currentShift = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
+
+    let calculatedPrice = stock.currentPrice;
+
+    if (currentShift >= 10.0 || stock.isCrashed) {
       stock.isCrashed = true;
-      calculatedPrice = basePrice * 0.70;
-      console.log(`⚡ CRASH: ${stock.ticker} movement ${movementPercent.toFixed(2)}% >= 10.0% -> Pegged at -30% (₹${calculatedPrice})`);
-    } else if (!stock.isCrashed && !stock.isSqueezed && movementPercent <= -10.0) {
+      const crashedTarget = roundStartPrice * 0.70;
+      const noise = (Math.random() * 1.9 - 0.95) / 100;
+      calculatedPrice = crashedTarget * (1 + noise);
+      if (currentShift >= 10.0 && !stock.wasLoggedCrash) {
+        console.log(`⚡ CRASH: ${stock.ticker} shifted ${currentShift.toFixed(2)}% >= 10.0% -> Pegged at -30% (₹${calculatedPrice})`);
+        stock.wasLoggedCrash = true;
+      }
+    } else if (currentShift <= -10.0 || stock.isSqueezed) {
       stock.isSqueezed = true;
-      calculatedPrice = basePrice * 1.30;
-      console.log(`🚀 SQUEEZE: ${stock.ticker} movement ${movementPercent.toFixed(2)}% <= -10.0% -> Pegged at +30% (₹${calculatedPrice})`);
-    } else if (stock.isCrashed) {
-      calculatedPrice = (basePrice * 0.70) * (1 + (currentTickNoise / 100));
-    } else if (stock.isSqueezed) {
-      calculatedPrice = (basePrice * 1.30) * (1 + (currentTickNoise / 100));
-    } else {
-      calculatedPrice = uncappedPrice;
+      const squeezedTarget = roundStartPrice * 1.30;
+      const noise = (Math.random() * 1.9 - 0.95) / 100;
+      calculatedPrice = squeezedTarget * (1 + noise);
+      if (currentShift <= -10.0 && !stock.wasLoggedSqueeze) {
+        console.log(`🚀 SQUEEZE: ${stock.ticker} shifted ${currentShift.toFixed(2)}% <= -10.0% -> Pegged at +30% (₹${calculatedPrice})`);
+        stock.wasLoggedSqueeze = true;
+      }
     }
 
     stock.price = Math.max(Math.round(calculatedPrice * 100) / 100, 1);
-    stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
+    stock.currentPrice = stock.price;
+    stock.changePercent = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
   });
 
   broadcastPrices(roomCode, room);
   broadcastPortfolios(roomCode, room);
   broadcastLeaderboard(roomCode, room);
+  
+  // Sync full market state for immediate frontend reaction
+  io.to(roomCode).emit('market:update', { stocks: room.stocks });
 }
 
 function advanceMatchPhase(roomCode, room) {
@@ -1045,15 +1062,30 @@ io.on('connection', (socket) => {
       stock.currentPrice = price;
       
       // DO NOT overwrite stock.basePrice or round start prices so we preserve the percentage baseline!
-      // However, we must update originalRound3BasePrice to prevent Round 3 rubber-banding to the old price.
-      stock.originalRound3BasePrice = price;
-      
       stock.netInvestment = 0;
       stock.baselineNI = 0;
 
       // Recalculate the percentage change relative to original base price
-      if (stock.basePrice > 0) {
-        stock.changePercent = ((stock.currentPrice - stock.basePrice) / stock.basePrice) * 100;
+      if (targetRoom.phase === 'round3') {
+        const roundStartPrice = stock.round2ClosePrice || stock.basePrice;
+        const currentShift = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
+        
+        if (currentShift >= 10.0) {
+          stock.isCrashed = true;
+          stock.wasLoggedCrash = false;
+        } else if (currentShift <= -10.0) {
+          stock.isSqueezed = true;
+          stock.wasLoggedSqueeze = false;
+        } else {
+          stock.isCrashed = false;
+          stock.isSqueezed = false;
+        }
+        
+        stock.changePercent = currentShift;
+      } else {
+        if (stock.basePrice > 0) {
+          stock.changePercent = ((stock.currentPrice - stock.basePrice) / stock.basePrice) * 100;
+        }
       }
 
       console.log(`[SERVER SUCCESS] ${stock.ticker} updated to ₹${price} in room ${roomKey}`);
