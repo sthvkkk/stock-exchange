@@ -1002,63 +1002,72 @@ io.on('connection', (socket) => {
 
   // Master Price Manipulation — single authoritative listener with fallback room search
   socket.on('master:updatePrice', (data) => {
-    console.log('RECEIVED MASTER PRICE UPDATE:', data);
-    if (!data || !data.ticker || data.newPrice === undefined) return;
+    console.log('====================================');
+    console.log('[SERVER RECV] master:updatePrice:', data);
+    
+    if (!data || !data.ticker || data.newPrice === undefined) {
+      console.error('[SERVER ERROR] Invalid payload structure:', data);
+      return;
+    }
 
-    const targetPrice = parseFloat(data.newPrice);
-    if (isNaN(targetPrice) || targetPrice <= 0) return;
+    const price = Number(data.newPrice);
+    if (isNaN(price) || price <= 0) return;
 
-    // Strategy 1: direct key match via rooms.get() (rooms is a Map)
+    // Fallback search across rooms array to handle any roomCode mismatch
+    let roomKey = String(data.roomCode || '').trim();
     let targetRoom = null;
-    let resolvedCode = '';
-    const inputCode = String(data.roomCode || socket.roomCode || '').trim();
+    
+    // Safely check Map via .has() or iterate
+    if (roomKey && rooms.has(roomKey)) {
+      targetRoom = rooms.get(roomKey);
+    }
 
-    if (inputCode && rooms.has(inputCode)) {
-      targetRoom = rooms.get(inputCode);
-      resolvedCode = inputCode;
-    } else {
-      // Strategy 2: search by socket membership or host socket id
-      const cleanCode = inputCode.replace(/\D/g, '');
+    if (!targetRoom) {
+      // Search by socket id or numeric matching
       for (const [key, r] of rooms.entries()) {
-        if (key === cleanCode || r.hostSocketId === socket.id || (r.players && r.players.has(socket.id))) {
+        if (r.hostSocketId === socket.id || key === roomKey.replace(/\D/g, '')) {
           targetRoom = r;
-          resolvedCode = key;
+          roomKey = key;
           break;
         }
       }
     }
 
     if (!targetRoom) {
-      console.error('[MASTER PRICE ERROR] Could not locate active room for payload:', data, '| socket.roomCode:', socket.roomCode);
+      console.error(`[SERVER ERROR] No room found for roomCode: "${data.roomCode}" or host socket: "${socket.id}"`);
       return;
     }
 
     const stock = targetRoom.stocks.find(s => s.ticker.toUpperCase() === String(data.ticker).toUpperCase());
     if (stock) {
-      stock.price                   = Math.round(targetPrice * 100) / 100;
-      stock.currentPrice            = targetPrice;
-      stock.basePrice               = targetPrice;
-      stock.initialPrice            = targetPrice;
-      stock.startPrice              = targetPrice;
-      stock.round1BasePrice         = targetPrice;
-      stock.round2ClosePrice        = targetPrice;
-      stock.round3BasePrice         = targetPrice;
-      stock.originalRound3BasePrice = targetPrice;
-      stock.netInvestment           = 0;
-      stock.baselineNI              = 0;
-      stock.changePercent           = 0;
+      // Hard lock all price reference variables
+      stock.price = price;
+      stock.currentPrice = price;
+      stock.basePrice = price;
+      stock.initialPrice = price;
+      stock.startPrice = price;
+      stock.round1BasePrice = price;
+      stock.round2ClosePrice = price;
+      stock.round3BasePrice = price;
+      stock.originalRound3BasePrice = price;
+      stock.netInvestment = 0;
+      stock.baselineNI = 0;
+      stock.changePercent = 0;
 
-      console.log(`[MASTER PRICE SUCCESS] ${stock.ticker} updated to ₹${targetPrice} in room ${resolvedCode}`);
+      console.log(`[SERVER SUCCESS] ${stock.ticker} updated to ₹${price} in room ${roomKey}`);
 
-      // Broadcast immediately so players and host sync instantly
-      io.to(resolvedCode).emit('market:update', { stocks: targetRoom.stocks });
-      io.to(resolvedCode).emit('roomState', targetRoom);
+      // Broadcast update to all room occupants
+      io.to(roomKey).emit('market:update', { stocks: targetRoom.stocks });
+      io.to(roomKey).emit('roomState', targetRoom);
       
-      broadcastPrices(resolvedCode, targetRoom);
-      broadcastPortfolios(resolvedCode, targetRoom);
-      broadcastLeaderboard(resolvedCode, targetRoom);
+      broadcastPrices(roomKey, targetRoom);
+      broadcastPortfolios(roomKey, targetRoom);
+      broadcastLeaderboard(roomKey, targetRoom);
       socket.emit('masterActionResult', { success: true, message: `Updated ${stock.ticker} to ₹${stock.price}` });
+    } else {
+      console.error(`[SERVER ERROR] Stock ${data.ticker} not found in room ${roomKey}`);
     }
+    console.log('====================================');
   });
 
   // Trade Execution (Separate LONG and SHORT tracking per ticker)
