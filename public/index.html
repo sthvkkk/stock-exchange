@@ -1060,39 +1060,37 @@
                 if(data.message) showToast(data.message, data.success ? 'success' : 'error');
             });
 
-            // --- LOCAL CLOCK UI RENDER LOOP ---
-            if (window.localClockInterval) clearInterval(window.localClockInterval);
-            
-            function updateClockDisplay() {
-                const timerEl = document.getElementById('timerDisplay') || document.querySelector('.timer-text');
-                const masterTimerEl = document.getElementById('masterTimerDisplay');
+            window.targetRoundEndTime = null;
+            window.isTimerPaused = false;
+
+            function tickClockUI() {
+                const clockElements = document.querySelectorAll('#timerDisplay, #masterTimerDisplay, .timer-display, #roundTimer, [data-timer]');
+                if (!clockElements.length) return;
 
                 if (!window.targetRoundEndTime) {
-                    if (timerEl) timerEl.innerText = "10:00";
-                    if (masterTimerEl) masterTimerEl.innerText = "10:00";
+                    clockElements.forEach(el => el.innerText = "10:00");
                     return;
                 }
-                
-                let remainingMs;
-                if (isPaused) {
-                    // When paused, freeze the timer visually.
+
+                let totalSeconds = 0;
+                if (window.isTimerPaused) {
                     if (window.frozenRemainingMs === undefined) {
-                         window.frozenRemainingMs = Math.max(0, window.targetRoundEndTime - Date.now());
+                        window.frozenRemainingMs = Math.max(0, window.targetRoundEndTime - Date.now());
                     }
-                    remainingMs = window.frozenRemainingMs;
+                    totalSeconds = Math.floor(window.frozenRemainingMs / 1000);
                 } else {
                     window.frozenRemainingMs = undefined;
-                    remainingMs = Math.max(0, window.targetRoundEndTime - Date.now());
+                    const remainingMs = Math.max(0, window.targetRoundEndTime - Date.now());
+                    totalSeconds = Math.floor(remainingMs / 1000);
                 }
-                
-                const totalSeconds = Math.floor(remainingMs / 1000);
-                
+
                 const minutes = Math.floor(totalSeconds / 60);
                 const seconds = totalSeconds % 60;
-                const display = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
                 
-                const remaining = totalSeconds;
+                const formattedTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                clockElements.forEach(el => el.innerText = formattedTime);
 
+                const remaining = totalSeconds;
                 const isRoundActive = (currentPhase && currentPhase.startsWith('round') && !isMarketFrozen && currentPhase !== 'finished') || (currentPhase === 'standard' && !isMarketFrozen && remaining > 0);
                 const canDecrease = isRoundActive && remaining >= 60;
 
@@ -1117,10 +1115,9 @@
                 }
 
                 if(isMaster) {
-                    document.getElementById('masterTimerDisplay').textContent = display;
-                    document.getElementById('masterPhaseLabel').textContent = isPaused ? 'PAUSED' : (currentPhase ? currentPhase.toUpperCase() : 'MATCH');
+                    document.getElementById('masterPhaseLabel').textContent = window.isTimerPaused ? 'PAUSED' : (currentPhase ? currentPhase.toUpperCase() : 'MATCH');
                     const badge = document.getElementById('masterFreezeBadge');
-                    if(isPaused) {
+                    if(window.isTimerPaused) {
                         badge.textContent = 'MATCH PAUSED';
                         badge.className = 'px-3 py-1 text-xs font-bold rounded-full bg-amber-950 text-amber-400 border border-amber-800';
                     } else if(isMarketFrozen) {
@@ -1132,21 +1129,23 @@
                     }
                     if (currentStocks) renderStocks(Object.values(currentStocks));
                 } else {
-                    document.getElementById('timerDisplay').textContent = display;
                     if(currentPhase && currentPhase !== 'standard') {
                         const badge = document.getElementById('arenaPhaseBadge');
                         if (badge) {
-                            badge.textContent = isPaused ? `${currentPhase.toUpperCase()} (PAUSED)` : isMarketFrozen ? `${currentPhase.toUpperCase()} (FROZEN)` : currentPhase.toUpperCase();
+                            badge.textContent = window.isTimerPaused ? `${currentPhase.toUpperCase()} (PAUSED)` : isMarketFrozen ? `${currentPhase.toUpperCase()} (FROZEN)` : currentPhase.toUpperCase();
                         }
                     }
                 }
             }
-            window.localClockInterval = setInterval(updateClockDisplay, 1000);
+
+            if (window.clockIntervalId) clearInterval(window.clockIntervalId);
+            window.clockIntervalId = setInterval(tickClockUI, 200);
 
             socket.on('timer:sync', (data) => {
-                if(data.roundEndTime) {
-                    window.targetRoundEndTime = data.roundEndTime;
-                    updateClockDisplay();
+                if(data.roundEndTime) window.targetRoundEndTime = data.roundEndTime;
+                if(typeof data.isPaused !== 'undefined') {
+                    window.isTimerPaused = !!data.isPaused;
+                    isPaused = !!data.isPaused;
                 }
             });
 
@@ -1159,7 +1158,7 @@
                     const banner = document.getElementById('newsBanner');
                     if (banner) banner.className = 'overflow-hidden h-0 opacity-0 transition-all duration-500 hidden';
                 }
-                updateClockDisplay();
+                tickClockUI();
             });
 
             socket.on('matchStateUpdated', (data) => {

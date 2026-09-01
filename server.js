@@ -340,15 +340,13 @@ function startGame(roomCode, room) {
     endTime: room.roundEndTime
   });
 
-  io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime });
+  io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused || false });
   broadcastPortfolios(roomCode, room);
   broadcastLeaderboard(roomCode, room);
 
   // 1-second Tick Loop
   room.tickInterval = setInterval(() => {
     if (room.isPaused) {
-      // Game paused by Master: push end time forward
-      room.roundEndTime += 1000;
       return;
     }
 
@@ -568,7 +566,7 @@ function advanceMatchPhase(roomCode, room) {
     return;
   }
 
-  io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime });
+  io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused || false });
   io.to(roomCode).emit('phaseChanged', {
     phase: room.phase,
     phaseTimer: room.phaseTimer,
@@ -625,7 +623,7 @@ io.on('connection', (socket) => {
       isPaused: room.isPaused,
       endTime: room.roundEndTime
     });
-    socket.emit('timer:sync', { roundEndTime: room.roundEndTime });
+    socket.emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused || false });
   });
 
   socket.on('room:getLobbyState', (data) => {
@@ -670,7 +668,7 @@ io.on('connection', (socket) => {
     list.sort((a, b) => b.netWorth - a.netWorth);
     list.forEach((p, i) => p.rank = i + 1);
     socket.emit('leaderboard', list);
-    socket.emit('timer:sync', { roundEndTime: room.roundEndTime });
+    socket.emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused || false });
   });
 
   socket.on('createRoom', ({ playerName, durationMinutes }) => {
@@ -783,8 +781,17 @@ io.on('connection', (socket) => {
     if (!room || !room.gameStarted) return socket.emit('error', { message: 'Room or game not active.' });
     if (!verifyHost(socket, room, hostToken)) return socket.emit('error', { message: 'Only the host can pause/resume.' });
 
-    room.isPaused = !room.isPaused;
-    io.to(roomCodeStr).emit('timer:sync', { roundEndTime: room.roundEndTime });
+    if (!room.isPaused) {
+      room.isPaused = true;
+      room.pauseOffsetMs = room.roundEndTime - Date.now();
+    } else {
+      room.isPaused = false;
+      if (room.pauseOffsetMs) {
+        room.roundEndTime = Date.now() + room.pauseOffsetMs;
+      }
+    }
+    
+    io.to(roomCodeStr).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused });
     io.to(roomCodeStr).emit('matchStateUpdated', {
       isPaused: room.isPaused,
       isMarketFrozen: room.isMarketFrozen || room.isPaused,
@@ -820,7 +827,7 @@ io.on('connection', (socket) => {
       return socket.emit('error', { message: 'Round is already in a break window.' });
     }
 
-    io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime });
+    io.to(roomCode).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused || false });
     io.to(roomCode).emit('phaseChanged', {
       phase: room.phase,
       phaseTimer: room.phaseTimer,
@@ -864,7 +871,7 @@ io.on('connection', (socket) => {
       isPaused: room.isPaused,
       endTime: room.roundEndTime
     });
-    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.roundEndTime });
+    io.to(roomCodeStr).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused });
     io.to(roomCodeStr).emit('matchStateUpdated', {
       message: 'Break extended by +5 minutes by Master!',
     });
@@ -898,7 +905,7 @@ io.on('connection', (socket) => {
       isPaused: room.isPaused,
       endTime: room.roundEndTime
     });
-    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.roundEndTime });
+    io.to(roomCodeStr).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused });
 
     socket.emit('masterActionResult', { success: true, message: 'Round extended by 5 minutes' });
     io.to(roomCodeStr).emit('matchStateUpdated', { message: 'Round extended by +5 minutes by Master!' });
@@ -950,7 +957,7 @@ io.on('connection', (socket) => {
       isPaused: room.isPaused,
       endTime: room.roundEndTime
     });
-    io.to(roomCodeStr).emit('timer:update', { roundEndTime: room.roundEndTime });
+    io.to(roomCodeStr).emit('timer:sync', { roundEndTime: room.roundEndTime, isPaused: room.isPaused });
 
     socket.emit('masterActionResult', { success: true, message: 'Round reduced by 1 minute' });
     io.to(roomCodeStr).emit('matchStateUpdated', { message: 'Round reduced by -1 minute by Master!' });
