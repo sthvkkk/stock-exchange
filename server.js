@@ -551,6 +551,7 @@ function advanceMatchPhase(roomCode, room) {
     room.stocks.forEach(s => {
       s.round2ClosePrice = s.price;
       s.round2ClosingPrice = s.price;
+      s.round3BasePrice = s.price; // explicit round 3 baseline
       s.r3BaselineNI = 0;
       s.circuitBreakerTriggered = false;
       s.crashedBasePrice = null;
@@ -561,13 +562,22 @@ function advanceMatchPhase(roomCode, room) {
     room.roundEndTime = Date.now() + (room.phaseTimer * 1000);
     room.isMarketFrozen = false;
 
-    // Ensure round2ClosePrice is stored for all stocks
+    // Ensure round2ClosePrice is stored for all stocks and evaluate immediate crash
     room.stocks.forEach(s => {
       if (!s.round2ClosePrice) s.round2ClosePrice = s.price;
       if (!s.round2ClosingPrice) s.round2ClosingPrice = s.price;
+      if (!s.round3BasePrice) s.round3BasePrice = s.round2ClosePrice;
       if (typeof s.r3BaselineNI !== 'number') s.r3BaselineNI = 0;
       if (typeof s.circuitBreakerTriggered === 'undefined') s.circuitBreakerTriggered = false;
       if (typeof s.crashedBasePrice === 'undefined') s.crashedBasePrice = null;
+      
+      // Calculate start-of-round percentage relative to round2ClosePrice
+      s.currentPrice = s.price; 
+      s.changePercent = ((s.currentPrice - s.round2ClosePrice) / s.round2ClosePrice) * 100;
+      
+      if (s.changePercent >= 10.0) {
+        s.isCrashed = true;
+      }
     });
 
     // Initial recalculation for Round 3 start
@@ -588,6 +598,18 @@ function advanceMatchPhase(roomCode, room) {
     isMarketFrozen: room.isMarketFrozen,
     endTime: room.roundEndTime
   });
+  
+  io.to(roomCode).emit('market:update', { stocks: room.stocks });
+  const safeRoomState = {
+    roomCode: room.roomCode,
+    phase: room.phase,
+    isPaused: room.isPaused,
+    isMarketFrozen: room.isMarketFrozen,
+    roundEndTime: room.roundEndTime,
+    stocks: room.stocks
+  };
+  io.to(roomCode).emit('roomState', safeRoomState);
+  
   console.log(`⏱️ Match ${roomCode} phase changed to ${room.phase}`);
 }
 
