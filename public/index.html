@@ -663,11 +663,11 @@
                                   ${!canEditPrice ? 'disabled' : ''}
                                   onfocus="this.dataset.isEditing='true'"
                                   onblur="this.dataset.isEditing='false'"
-                                  onkeydown="if(event.key==='Enter') window.forceUpdatePrice('${stock.ticker}')"
+                                  onkeydown="if(event.key==='Enter') window.handleMasterSave('${stock.ticker}', this)"
                                   class="price-input w-24 bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg focus:outline-none focus:border-blue-500 disabled:opacity-50"
                                   data-is-editing="false"
                                 >
-                                <button id="masterBtn-${stock.ticker}" type="button" onclick="window.forceUpdatePrice('${stock.ticker}')" ${!canEditPrice ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
+                                <button id="masterBtn-${stock.ticker}" type="button" onclick="window.handleMasterSave('${stock.ticker}', this)" ${!canEditPrice ? 'disabled' : ''} class="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-all">Save</button>
                             </div>
                         `;
                         masterInputs.appendChild(div);
@@ -705,45 +705,58 @@
             return roomCode;
         }
 
-        window.forceUpdatePrice = function(ticker) {
-            const el = document.getElementById(`input-price-${ticker}`);
-            if (!el) {
-                console.error("Missing input element for ticker:", ticker);
+        window.handleMasterSave = function(ticker, buttonEl) {
+            // Walk up from the clicked element to find the sibling input
+            const container = (buttonEl && (buttonEl.closest('div') || buttonEl.parentElement)) || document.body;
+            let inputEl = container.querySelector('input');
+
+            // Fallback: look up by known ID scheme
+            if (!inputEl) inputEl = document.getElementById(`input-price-${ticker}`);
+
+            if (!inputEl) {
+                alert('Input field not found!');
+                console.error('===> FRONTEND: input not found for ticker', ticker);
                 return;
             }
 
-            const rawVal = el.value;
-            const parsedPrice = parseFloat(rawVal);
+            const targetPrice = parseFloat(inputEl.value);
+            console.log('===> FRONTEND SENDING PRICE:', ticker, targetPrice);
 
-            console.log(`[MASTER OVERRIDE] Emitting price update for ${ticker}:`, parsedPrice);
-
-            if (isNaN(parsedPrice) || parsedPrice <= 0) {
-                alert("Please enter a valid numeric price.");
+            if (isNaN(targetPrice) || targetPrice <= 0) {
+                alert('Invalid price entered');
                 return;
             }
+
+            // Resolve roomCode — try every available source
+            const rCode = String(
+                window.currentRoomCode ||
+                currentRoomCode ||
+                document.getElementById('roomCodeDisplay')?.innerText ||
+                ''
+            ).trim();
 
             socket.emit('master:updatePrice', {
-                roomCode: String(window.currentRoomCode || currentRoomCode),
+                roomCode: rCode,
                 ticker: String(ticker),
-                newPrice: parsedPrice,
-                hostToken
+                newPrice: targetPrice
             });
 
-            el.dataset.isEditing = 'false';
+            inputEl.dataset.isEditing = 'false';
 
             const currentDisplay = document.getElementById(`masterCurrentPrice-${ticker}`);
-            if (currentDisplay) currentDisplay.textContent = formatMoney(parsedPrice);
+            if (currentDisplay) currentDisplay.textContent = formatMoney(targetPrice);
 
             const mainDisplay = document.getElementById(`price-${ticker}`);
-            if (mainDisplay) mainDisplay.textContent = formatMoney(parsedPrice);
+            if (mainDisplay) mainDisplay.textContent = formatMoney(targetPrice);
 
-            showToast(`Override sent: ${ticker} = ₹${parsedPrice.toFixed(2)}`, 'success');
+            if (typeof showToast === 'function') showToast(`Updating ${ticker} to ₹${targetPrice.toFixed(2)}...`, 'success');
         };
 
-        // Backward-compat aliases
-        window.submitMasterPrice = (ticker) => window.forceUpdatePrice(ticker);
-        window.saveMasterPrice   = (ticker) => window.forceUpdatePrice(ticker);
-        window.applyMasterPrice  = (ticker) => window.forceUpdatePrice(ticker);
+        // All previous function names are aliases of the canonical handler
+        window.forceUpdatePrice  = (ticker) => window.handleMasterSave(ticker, document.getElementById(`input-price-${ticker}`));
+        window.submitMasterPrice = (ticker) => window.handleMasterSave(ticker, document.getElementById(`input-price-${ticker}`));
+        window.saveMasterPrice   = (ticker) => window.handleMasterSave(ticker, document.getElementById(`input-price-${ticker}`));
+        window.applyMasterPrice  = (ticker) => window.handleMasterSave(ticker, document.getElementById(`input-price-${ticker}`));
 
         // MASTER CONTROL SUITE ACTIONS
         window.masterTogglePause = () => {

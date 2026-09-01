@@ -1000,63 +1000,44 @@ io.on('connection', (socket) => {
     endGame(roomCodeStr, room);
   });
 
-  // Master Price Manipulation
-  const handleMasterPriceUpdate = (data) => {
-    const { roomCode, ticker, newPrice, hostToken } = data;
-    console.log('[SERVER RECV] master:updatePrice:', data);
+  // Master Price Manipulation — single authoritative listener
+  socket.on('master:updatePrice', (data) => {
+    console.log('===> MASTER PRICE EVENT RECEIVED:', data);
+    if (!data || !data.ticker || data.newPrice === undefined) return;
 
-    const roomCodeStr = String(roomCode || socket.roomCode).trim();
+    const roomCodeStr = String(data.roomCode || socket.roomCode || '').trim();
     const room = rooms.get(roomCodeStr);
+
     if (!room) {
-      console.error('[SERVER ERROR] Room not found for price update:', roomCodeStr);
-      return socket.emit('error', { message: 'Room not found.' });
-    }
-    if (room.mode !== 'match') {
-      return socket.emit('error', { message: 'Master control is only available in Match mode.' });
-    }
-    if (!verifyHost(socket, room, hostToken)) {
-      return socket.emit('error', { message: 'Only the Master can update stock prices.' });
+      console.error('===> ROOM NOT FOUND FOR PRICE UPDATE:', roomCodeStr);
+      return;
     }
 
-    const stock = room.stocks.find(s => s.ticker === String(ticker));
-    if (!stock) {
-      return socket.emit('error', { message: `Stock ${ticker} not found.` });
+    const numericPrice = Number(data.newPrice);
+    if (isNaN(numericPrice) || numericPrice <= 0) return;
+
+    const stock = room.stocks.find(s => String(s.ticker).toUpperCase() === String(data.ticker).toUpperCase());
+    if (stock) {
+      stock.price          = Math.round(numericPrice * 100) / 100;
+      stock.currentPrice   = numericPrice;
+      stock.basePrice      = numericPrice;
+      stock.round1BasePrice = numericPrice;
+      stock.round2ClosePrice = numericPrice;
+      stock.round3BasePrice  = numericPrice;
+      stock.originalRound3BasePrice = numericPrice;
+      stock.netInvestment  = 0;
+      stock.baselineNI     = 0;
+      stock.changePercent  = 0;
+
+      console.log(`===> SUCCESS: Updated ${stock.ticker} price to ${numericPrice} in room ${roomCodeStr}`);
+
+      io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
+      broadcastPrices(roomCodeStr, room);
+      broadcastPortfolios(roomCodeStr, room);
+      broadcastLeaderboard(roomCodeStr, room);
+      socket.emit('masterActionResult', { success: true, message: `Updated ${stock.ticker} to ₹${stock.price}` });
     }
-
-    const targetPrice = parseFloat(newPrice);
-    if (isNaN(targetPrice) || targetPrice <= 0) {
-      return socket.emit('error', { message: 'Invalid price value.' });
-    }
-
-    stock.price = Math.round(targetPrice * 100) / 100;
-
-    // Hard-overwrite every price baseline so no formula can revert the change
-    stock.currentPrice = targetPrice;
-    stock.basePrice = targetPrice;
-    stock.round1BasePrice = targetPrice;
-    stock.round2ClosePrice = targetPrice;
-    stock.round3BasePrice = targetPrice;
-    stock.originalRound3BasePrice = targetPrice;
-
-    // Zero order-flow accumulators so dynamic pricing ticks from the new baseline
-    stock.netInvestment = 0;
-    stock.baselineNI = 0;
-
-    stock.changePercent = 0;
-
-    console.log(`🛠️ Master set ${ticker} = ₹${stock.price} in room ${roomCodeStr}`);
-
-    // Broadcast immediately to whole room
-    io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
-    broadcastPrices(roomCodeStr, room);
-    broadcastPortfolios(roomCodeStr, room);
-    broadcastLeaderboard(roomCodeStr, room);
-    socket.emit('masterActionResult', { success: true, message: `Updated ${ticker} price to ₹${stock.price}` });
-  };
-
-  socket.on('masterUpdatePrice', handleMasterPriceUpdate);
-  socket.on('master:updatePrice', handleMasterPriceUpdate);
-  socket.on('master:setPrice', handleMasterPriceUpdate);
+  });
 
   // Trade Execution (Separate LONG and SHORT tracking per ticker)
   const handleExecuteTrade = ({ roomCode, ticker, action, type, quantity }) => {
