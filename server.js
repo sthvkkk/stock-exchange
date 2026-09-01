@@ -1113,26 +1113,21 @@ io.on('connection', (socket) => {
         stock.baselineNI = 0;
       }
       
+      stock.isCrashed = false;
+      stock.isSurged = false;
+      stock.wasLoggedCrash = false;
+      stock.wasLoggedSurge = false;
+
       const shift = ((stock.currentPrice - activeBase) / activeBase) * 100;
-      
-      if (shift <= -10.0) {
-        stock.isSurged = true;
-        stock.wasLoggedSurge = false;
-        stock.isCrashed = false;
-        stock.wasLoggedCrash = false;
-      } else if (shift >= 10.0) {
-        stock.isCrashed = true;
-        stock.wasLoggedCrash = false;
-        stock.isSurged = false;
-        stock.wasLoggedSurge = false;
-      } else {
-        stock.isCrashed = false;
-        stock.wasLoggedCrash = false;
-        stock.isSurged = false;
-        stock.wasLoggedSurge = false;
-      }
-      
       stock.changePercent = shift;
+
+      if (targetRoom.phase === 'round3') {
+        if (stock.changePercent >= 10.0) {
+          stock.isCrashed = true;
+        } else if (stock.changePercent <= -10.0) {
+          stock.isSurged = true;
+        }
+      }
 
       console.log(`[SERVER SUCCESS] ${stock.ticker} updated to ₹${price} in room ${roomKey}`);
 
