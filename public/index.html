@@ -1064,7 +1064,7 @@
             window.isTimerPaused = false;
 
             function tickClockUI() {
-                const clockElements = document.querySelectorAll('#timerDisplay, #masterTimerDisplay, .timer-display, #roundTimer, [data-timer]');
+                const clockElements = document.querySelectorAll('#timerDisplay, #masterTimerDisplay, .timer-display, #roundTimer, [data-timer], .master-timer-text, #masterClock');
                 if (!clockElements.length) return;
 
                 if (!window.targetRoundEndTime) {

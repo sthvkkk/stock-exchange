@@ -450,15 +450,16 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
   if (room.mode !== 'match' || room.phase !== 'round3' || room.isMarketFrozen) return;
 
   room.stocks.forEach(stock => {
-    let basePrice = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
+    if (!stock.originalRound3BasePrice) {
+      stock.originalRound3BasePrice = stock.round2ClosePrice || stock.round2ClosingPrice || stock.basePrice;
+    }
+    const basePrice = stock.originalRound3BasePrice;
     if (!basePrice || basePrice <= 0) return;
 
-    if (typeof stock.r3BaselineNI !== 'number') stock.r3BaselineNI = 0;
     if (typeof stock.isCrashed === 'undefined') stock.isCrashed = false;
     if (typeof stock.isSqueezed === 'undefined') stock.isSqueezed = false;
 
     if (updateTickNoise || typeof stock.r3TickNoisePct !== 'number') {
-      // Continuous random noise factor between -0.95% and +0.95% per 1-second tick
       stock.r3TickNoisePct = Math.round(((Math.random() * 1.90) - 0.95) * 100) / 100;
     }
 
@@ -472,39 +473,33 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       }
     });
 
-    const currentNI = (totalLongQty - totalShortQty) * basePrice;
-    const netInvestmentRupees = currentNI - stock.r3BaselineNI;
-
+    const netInvestmentRupees = (totalLongQty - totalShortQty) * basePrice;
     const demandPercent = (netInvestmentRupees / 1000000) * 2;
     const currentTickNoise = stock.r3TickNoisePct || 0;
+    const totalShiftPercent = demandPercent + currentTickNoise;
 
-    const totalPercentChange = Math.round((demandPercent + currentTickNoise) * 100) / 100;
+    const uncappedPrice = basePrice * (1 + (totalShiftPercent / 100));
+    const movementPercent = ((uncappedPrice - basePrice) / basePrice) * 100;
+
     let calculatedPrice;
 
-    if (!stock.isCrashed && !stock.isSqueezed && totalPercentChange >= 10.0) {
+    if (!stock.isCrashed && !stock.isSqueezed && movementPercent >= 10.0) {
       stock.isCrashed = true;
-      basePrice = Math.round((basePrice * 0.70) * 100) / 100;
-      stock.round2ClosePrice = basePrice;
-      stock.round2ClosingPrice = basePrice;
-      stock.r3BaselineNI = currentNI; 
-      calculatedPrice = Math.round((basePrice * (1 + (currentTickNoise / 100))) * 100) / 100;
-      console.log(`⚡ CRASH: ${stock.ticker} shift ${totalPercentChange}% >= 10.0% -> Base locked at -30% (₹${basePrice})`);
-    } else if (!stock.isCrashed && !stock.isSqueezed && totalPercentChange <= -10.0) {
+      calculatedPrice = basePrice * 0.70;
+      console.log(`⚡ CRASH: ${stock.ticker} movement ${movementPercent.toFixed(2)}% >= 10.0% -> Pegged at -30% (₹${calculatedPrice})`);
+    } else if (!stock.isCrashed && !stock.isSqueezed && movementPercent <= -10.0) {
       stock.isSqueezed = true;
-      basePrice = Math.round((basePrice * 1.30) * 100) / 100;
-      stock.round2ClosePrice = basePrice;
-      stock.round2ClosingPrice = basePrice;
-      stock.r3BaselineNI = currentNI;
-      calculatedPrice = Math.round((basePrice * (1 + (currentTickNoise / 100))) * 100) / 100;
-      console.log(`🚀 SQUEEZE: ${stock.ticker} shift ${totalPercentChange}% <= -10.0% -> Base locked at +30% (₹${basePrice})`);
-    } else if (stock.isCrashed || stock.isSqueezed) {
-      // If already crashed or squeezed, it just flickers around the new locked basePrice using tick noise
-      calculatedPrice = Math.round((basePrice * (1 + (currentTickNoise / 100))) * 100) / 100;
+      calculatedPrice = basePrice * 1.30;
+      console.log(`🚀 SQUEEZE: ${stock.ticker} movement ${movementPercent.toFixed(2)}% <= -10.0% -> Pegged at +30% (₹${calculatedPrice})`);
+    } else if (stock.isCrashed) {
+      calculatedPrice = (basePrice * 0.70) * (1 + (currentTickNoise / 100));
+    } else if (stock.isSqueezed) {
+      calculatedPrice = (basePrice * 1.30) * (1 + (currentTickNoise / 100));
     } else {
-      calculatedPrice = Math.round((basePrice * (1 + (totalPercentChange / 100))) * 100) / 100;
+      calculatedPrice = uncappedPrice;
     }
 
-    stock.price = Math.max(calculatedPrice, 1);
+    stock.price = Math.max(Math.round(calculatedPrice * 100) / 100, 1);
     stock.changePercent = ((stock.price - stock.basePrice) / stock.basePrice) * 100;
   });
 
