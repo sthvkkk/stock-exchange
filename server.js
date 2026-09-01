@@ -144,9 +144,8 @@ function tickPrices(room) {
         const reversion = (stock.basePrice - stock.price) * 0.03;
         stock.price = stock.price * (1 + noise) + reversion;
         
-        const minPrice = stock.basePrice * 0.88;
         const maxPrice = stock.basePrice * 1.12;
-        stock.price = Math.min(Math.max(stock.price, minPrice), maxPrice);
+        stock.price = Math.min(stock.price, maxPrice);
       }
 
       stock.price = Math.max(stock.price, 1);
@@ -486,8 +485,8 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
 
     const roundStartPrice = stock.round2ClosePrice || stock.basePrice;
     
-    // Only apply organic movement if NOT crashed or squeezed
-    if (!stock.isCrashed && !stock.isSqueezed) {
+    // Only apply organic movement if NOT crashed
+    if (!stock.isCrashed) {
       stock.currentPrice = uncappedPrice;
     }
 
@@ -503,15 +502,6 @@ function recalculateRound3Prices(roomCode, room, updateTickNoise = false) {
       if (currentShift >= 10.0 && !stock.wasLoggedCrash) {
         console.log(`⚡ CRASH: ${stock.ticker} shifted ${currentShift.toFixed(2)}% >= 10.0% -> Pegged at -30% (₹${calculatedPrice})`);
         stock.wasLoggedCrash = true;
-      }
-    } else if (currentShift <= -10.0 || stock.isSqueezed) {
-      stock.isSqueezed = true;
-      const squeezedTarget = roundStartPrice * 1.30;
-      const noise = (Math.random() * 1.9 - 0.95) / 100;
-      calculatedPrice = squeezedTarget * (1 + noise);
-      if (currentShift <= -10.0 && !stock.wasLoggedSqueeze) {
-        console.log(`🚀 SQUEEZE: ${stock.ticker} shifted ${currentShift.toFixed(2)}% <= -10.0% -> Pegged at +30% (₹${calculatedPrice})`);
-        stock.wasLoggedSqueeze = true;
       }
     }
 
@@ -1088,26 +1078,20 @@ io.on('connection', (socket) => {
       stock.baselineNI = 0;
 
       // Recalculate the percentage change relative to original base price
-      if (targetRoom.phase === 'round3') {
-        const roundStartPrice = stock.round2ClosePrice || stock.basePrice;
-        const currentShift = ((stock.currentPrice - roundStartPrice) / roundStartPrice) * 100;
-        
-        if (currentShift >= 10.0) {
-          stock.isCrashed = true;
-          stock.wasLoggedCrash = false;
-        } else if (currentShift <= -10.0) {
-          stock.isSqueezed = true;
-          stock.wasLoggedSqueeze = false;
-        } else {
-          stock.isCrashed = false;
-          stock.isSqueezed = false;
-        }
-        
-        stock.changePercent = currentShift;
+      const base = stock.round2ClosePrice || stock.basePrice || stock.initialPrice;
+      
+      if (price < base * 1.10) { 
+        stock.isCrashed = false;
+        stock.wasLoggedCrash = false;
       } else {
-        if (stock.basePrice > 0) {
-          stock.changePercent = ((stock.currentPrice - stock.basePrice) / stock.basePrice) * 100;
-        }
+        stock.isCrashed = true;
+        stock.wasLoggedCrash = false;
+      }
+
+      stock.isSqueezed = false; // Reset any previous squeeze states just in case
+
+      if (base > 0) {
+        stock.changePercent = ((stock.currentPrice - base) / base) * 100;
       }
 
       console.log(`[SERVER SUCCESS] ${stock.ticker} updated to ₹${price} in room ${roomKey}`);
