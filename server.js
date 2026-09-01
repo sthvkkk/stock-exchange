@@ -1058,7 +1058,16 @@ io.on('connection', (socket) => {
 
       // Broadcast update to all room occupants
       io.to(roomKey).emit('market:update', { stocks: targetRoom.stocks });
-      io.to(roomKey).emit('roomState', targetRoom);
+      
+      const safeRoomState = {
+        roomCode: targetRoom.roomCode,
+        phase: targetRoom.phase,
+        isPaused: targetRoom.isPaused,
+        isMarketFrozen: targetRoom.isMarketFrozen,
+        roundEndTime: targetRoom.roundEndTime,
+        stocks: targetRoom.stocks
+      };
+      io.to(roomKey).emit('roomState', safeRoomState);
       
       broadcastPrices(roomKey, targetRoom);
       broadcastPortfolios(roomKey, targetRoom);
