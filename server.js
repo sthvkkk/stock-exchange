@@ -1040,19 +1040,21 @@ io.on('connection', (socket) => {
 
     const stock = targetRoom.stocks.find(s => s.ticker.toUpperCase() === String(data.ticker).toUpperCase());
     if (stock) {
-      // Hard lock all price reference variables
+      // Hard lock current price variables
       stock.price = price;
       stock.currentPrice = price;
-      stock.basePrice = price;
-      stock.initialPrice = price;
-      stock.startPrice = price;
-      stock.round1BasePrice = price;
-      stock.round2ClosePrice = price;
-      stock.round3BasePrice = price;
+      
+      // DO NOT overwrite stock.basePrice or round start prices so we preserve the percentage baseline!
+      // However, we must update originalRound3BasePrice to prevent Round 3 rubber-banding to the old price.
       stock.originalRound3BasePrice = price;
+      
       stock.netInvestment = 0;
       stock.baselineNI = 0;
-      stock.changePercent = 0;
+
+      // Recalculate the percentage change relative to original base price
+      if (stock.basePrice > 0) {
+        stock.changePercent = ((stock.currentPrice - stock.basePrice) / stock.basePrice) * 100;
+      }
 
       console.log(`[SERVER SUCCESS] ${stock.ticker} updated to ₹${price} in room ${roomKey}`);
 
