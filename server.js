@@ -1020,27 +1020,25 @@ io.on('connection', (socket) => {
     }
 
     const stock = room.stocks.find(s => s.ticker === ticker);
-    const parsedPrice = parseFloat(newPrice);
-    if (stock && !isNaN(parsedPrice) && parsedPrice > 0) {
-      stock.price = Math.round(parsedPrice * 100) / 100;
-      
-      stock.currentPrice = stock.price;
-      stock.basePrice = stock.price;
-      stock.round1BasePrice = stock.price;
-      stock.round2ClosePrice = stock.price;
-      stock.round3BasePrice = stock.price;
-      stock.originalRound3BasePrice = stock.price;
-      
-      let totalLong = 0; let totalShort = 0;
-      room.players.forEach(player => {
-          const item = player.portfolio[ticker];
-          if (item) { totalLong += (item.longQty || 0); totalShort += (item.shortQty || 0); }
-      });
-      stock.baselineNI = (totalLong - totalShort) * stock.price;
-      stock.netInvestment = 0;
-      
-      stock.changePercent = 0; 
+    const targetPrice = Number(newPrice);
+    if (stock && !isNaN(targetPrice) && targetPrice > 0) {
+      stock.price = Math.round(targetPrice * 100) / 100;
 
+      // Hard-overwrite every price baseline so no formula can revert the change
+      stock.currentPrice = targetPrice;
+      stock.basePrice = targetPrice;
+      stock.round1BasePrice = targetPrice;
+      stock.round2ClosePrice = targetPrice;
+      stock.round3BasePrice = targetPrice;
+      stock.originalRound3BasePrice = targetPrice;
+
+      // Zero order-flow accumulators so dynamic pricing ticks from the new baseline
+      stock.netInvestment = 0;
+      stock.baselineNI = 0;
+
+      stock.changePercent = 0;
+
+      // Broadcast immediately
       io.to(roomCodeStr).emit('market:update', { stocks: room.stocks });
       broadcastPrices(roomCodeStr, room);
       broadcastPortfolios(roomCodeStr, room);
